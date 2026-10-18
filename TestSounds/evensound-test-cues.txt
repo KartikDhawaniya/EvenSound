@@ -1,0 +1,12 @@
+0:00  Music at a normal level (reference)
+0:15  Quiet dialogue with soft room hiss - should get easier to hear
+0:30  Door slam - should be softened
+0:48  Explosion during quiet dialogue
+0:55  Second, longer explosion
+1:00  Quiet dialogue right after explosions - should recover within a few seconds
+1:20  Loud advert - should be turned down
+1:40  Music at a normal level again
+2:00  Quiet dialogue with notification beeps every 5 s
+2:20  Only background hiss - should NOT be raised
+2:35  Whisper-level speech - tests the maximum lift
+2:50  Silence

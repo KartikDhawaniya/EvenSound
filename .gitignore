@@ -1,0 +1,8 @@
+.build/
+build/
+.DS_Store
+*.xcodeproj
+.swiftpm/
+
+# Generated test audio (large); the cue sheet is kept.
+TestSounds/*.wav
