@@ -67,8 +67,8 @@ public enum BalanceProfile: String, CaseIterable, Codable, Sendable, Identifiabl
 
     public var title: String {
         switch self {
-        case .thresholds: "Thresholds"
-        case .curve: "Smooth curve"
+        case .thresholds: "Fixed limits"
+        case .curve: "Smooth (recommended)"
         }
     }
 }

@@ -50,6 +50,9 @@ struct SoundGraphView: View {
                 }
             }
 
+            Text("The grey line is how loud the sound was coming in; the green line is how loud it left EvenSound. Newest is on the right. Dashed lines show your loudest (red) and quietest (blue) levels. When EvenSound is working well, the green line stays between them.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+
             LevelHistoryChart(
                 samples: samples,
                 capacity: window.rawValue * 10,
@@ -66,6 +69,8 @@ struct SoundGraphView: View {
             .font(.caption)
 
             Text("Change EvenSound is making").font(.body.weight(.medium))
+            Text("Green bars above the middle line mean sound was lifted; orange bars below mean it was turned down. Taller bars mean bigger changes.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             ChangeChart(samples: samples, capacity: window.rawValue * 10)
                 .frame(height: 90)
             HStack(spacing: 14) {

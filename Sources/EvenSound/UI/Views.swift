@@ -123,14 +123,14 @@ struct ThresholdControls: View {
     var body: some View {
         ThresholdSlider(
             title: "Quiet threshold",
-            caption: "Sound quieter than this is lifted toward it. \"Hear quiet sounds better\" sets how much of the gap is filled.",
+            caption: "Anything quieter than this is lifted toward it; anything louder isn't lifted at all. \"Hear quiet sounds better\" on the Overview sets how far it is lifted: 50% closes half the gap, 100% brings it right up to this level.",
             value: Binding(
                 get: { controller.settings.quietThresholdDB },
                 set: { controller.settings.quietThresholdDB = min($0, controller.settings.peakThresholdDB) }),
             range: SoundSettings.quietThresholdRange)
         ThresholdSlider(
             title: "Peak threshold",
-            caption: "Sound louder than this is pulled toward it. \"Reduce loud sounds\" sets how much of the excess is removed.",
+            caption: "Anything louder than this is turned down toward it; anything quieter isn't touched. \"Reduce loud sounds\" on the Overview sets how much: 50% removes half the extra loudness, 100% holds sound at this level.",
             value: Binding(
                 get: { controller.settings.peakThresholdDB },
                 set: {
@@ -147,7 +147,7 @@ struct CurveControls: View {
     var body: some View {
         ThresholdSlider(
             title: "Maximum level",
-            caption: "Loud sound is smoothly pulled toward this level and never goes past it.",
+            caption: "The loudest that sound should get. Loud sound is eased down toward this level, more firmly the louder it is. Move left if loud scenes still feel too loud.",
             value: Binding(
                 get: { controller.settings.curveMaxDB },
                 set: {
@@ -158,7 +158,7 @@ struct CurveControls: View {
             range: SoundSettings.curveMaxRange)
         ThresholdSlider(
             title: "Minimum level",
-            caption: "Quiet sound is smoothly lifted toward this level.",
+            caption: "The quietest that sound should get. Quiet sound is eased up toward this level. Move right if quiet voices are still hard to hear.",
             value: Binding(
                 get: { controller.settings.curveMinDB },
                 set: {
@@ -167,7 +167,7 @@ struct CurveControls: View {
             range: SoundSettings.curveMinRange)
         LabeledSlider(
             title: "Flatten",
-            caption: "Low keeps everyday sound natural. High pulls everything toward the same loudness.",
+            caption: "How strongly sound between the two levels is evened out. Low leaves normal-volume sound almost untouched; high makes everything nearly the same loudness, which can sound flat.",
             value: $controller.settings.curveFlatten)
         CurvePreview(
             minimum: min(controller.settings.curveMinDB, controller.settings.curveMaxDB - SoundSettings.curveMinimumGap),
@@ -317,6 +317,49 @@ struct NowSummary: View {
     }
 }
 
+struct InfoBox: View {
+    let title: String
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(title, systemImage: "info.circle").font(.callout.weight(.semibold))
+            Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+/// Simple bars showing how much EvenSound is lifting or softening right now.
+struct CorrectionMeter: View {
+    @EnvironmentObject private var controller: AudioController
+
+    var body: some View {
+        let change = controller.isActive ? controller.meters.currentOutputLUFS - controller.meters.currentInputLUFS : 0
+        VStack(alignment: .leading, spacing: 6) {
+            bar("Lifting quiet sound", amount: max(change, 0) / 12, color: .green)
+            bar("Softening loud sound", amount: max(-change, 0) / 15, color: .orange)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func bar(_ title: String, amount: Double, color: Color) -> some View {
+        HStack {
+            Text(title).font(.caption).frame(width: 140, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.quaternary)
+                    Capsule().fill(color).frame(width: geo.size.width * min(max(amount, 0), 1))
+                }
+            }
+            .frame(height: 8)
+            .animation(.easeOut(duration: 0.15), value: amount)
+        }
+    }
+}
+
 struct OverviewView: View {
     @EnvironmentObject private var controller: AudioController
 
@@ -367,6 +410,7 @@ struct OverviewView: View {
 
             if controller.settings.isEnabled {
                 NowSummary()
+                CorrectionMeter()
             }
         }
     }
@@ -378,8 +422,15 @@ struct AdvancedView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Levels are shown in decibels (dB). 0 dB is the loudest digital sound; lower numbers are quieter.")
-                    .font(.caption).foregroundStyle(.secondary)
+                InfoBox(title: "About these controls", text: """
+                    These controls decide which volume levels count as "too quiet" and "too loud". \
+                    The two sliders on the Overview still decide how strongly EvenSound corrects them, \
+                    and Intensity still decides how quickly.
+
+                    Levels are in decibels (dB). 0 dB is the loudest sound your Mac can play; \
+                    lower numbers are quieter. Most videos and music sit between -30 and -10 dB. \
+                    Your Mac's volume keys are applied afterwards, so these levels don't change when you turn the volume up or down.
+                    """)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Balancing style").font(.body.weight(.medium))
@@ -388,6 +439,10 @@ struct AdvancedView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
+                    Text(controller.settings.profile == .curve
+                        ? "Smooth: every level is adjusted a little, more the further it is from the middle. Nothing jumps at a hard edge, so it sounds the most natural. Best for most people."
+                        : "Fixed limits: sound between the two levels is left completely alone; only sound outside them is corrected. More predictable, but changes can be more noticeable at the edges.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 if controller.settings.profile == .curve {
@@ -397,6 +452,8 @@ struct AdvancedView: View {
                 }
 
                 if controller.isActive {
+                    Text("Live level: the grey bar is how loud the sound is coming in, the coloured bar is how loud it leaves EvenSound. The red and blue lines are your loudest and quietest levels. The bar turns orange while sound is above the red line.")
+                        .font(.caption).foregroundStyle(.secondary)
                     LevelMeter(
                         input: controller.meters.currentInputLUFS,
                         output: controller.meters.currentOutputLUFS,
@@ -438,10 +495,16 @@ struct SettingsView: View {
                     Picker("Loudest allowed sound", selection: $controller.settings.ceiling) {
                         ForEach(LoudnessCeiling.allCases) { Text($0.title).tag($0) }
                     }
+                    Text("A hard safety cap: no sound can ever go above it, however loud the original. Lower and Lowest leave more room below your speakers' maximum.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Picker("Background noise protection", selection: $controller.settings.noiseProtection) {
                         ForEach(NoiseProtection.allCases) { Text($0.title).tag($0) }
                     }
+                    Text("Very quiet sound such as hiss, hum or room noise is never lifted. Choose High if you hear background noise being made louder; Low if very soft voices aren't being lifted.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Toggle("Low delay mode (for games and instruments)", isOn: $controller.settings.lowLatency)
+                    Text("Reduces the tiny delay EvenSound adds. Only needed if you play an instrument or rhythm game through your Mac.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Button("Restore default settings") { controller.resetToDefaults() }
                 }
             }
