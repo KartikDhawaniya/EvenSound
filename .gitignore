@@ -6,3 +6,4 @@ build/
 
 # Generated test audio (large); the cue sheet is kept.
 TestSounds/*.wav
+dist/
