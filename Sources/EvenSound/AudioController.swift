@@ -4,8 +4,18 @@ import EvenSoundDSP
 import Foundation
 import ServiceManagement
 
+struct LevelSample {
+    /// nil while EvenSound isn't processing.
+    let input: Double?
+    let output: Double?
+}
+
 @MainActor
 final class AudioController: ObservableObject {
+    /// 5 minutes of history at 10 samples per second.
+    static let historyCapacity = 3000
+    @Published private(set) var history: [LevelSample] = []
+
     enum Status: Equatable {
         case off
         case needsPermission
@@ -223,11 +233,28 @@ final class AudioController: ObservableObject {
         } else if meters != ProcessorMeters() {
             meters = ProcessorMeters()
         }
+        recordHistory()
         if case .active = status, let idle = engine.secondsSinceLastCallback, idle > 2 {
             scheduleRestart()
         }
         if case .needsPermission = status, AudioCapturePermission.status == .authorized, settings.isEnabled {
             startProcessing()
+        }
+    }
+
+    private func recordHistory() {
+        let sample: LevelSample
+        if isActive {
+            let floor = -90.0
+            sample = LevelSample(
+                input: max(meters.currentInputLUFS, floor),
+                output: max(meters.currentOutputLUFS, floor))
+        } else {
+            sample = LevelSample(input: nil, output: nil)
+        }
+        history.append(sample)
+        if history.count > Self.historyCapacity {
+            history.removeFirst(history.count - Self.historyCapacity)
         }
     }
 

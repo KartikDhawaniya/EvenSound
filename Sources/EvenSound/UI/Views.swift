@@ -2,7 +2,7 @@ import EvenSoundDSP
 import SwiftUI
 
 struct MainView: View {
-    private enum Tab: Hashable { case overview, settings }
+    private enum Tab: Hashable { case overview, graph, settings }
     @State private var tab = Tab.overview
 
     var body: some View {
@@ -10,12 +10,15 @@ struct MainView: View {
             OverviewView()
                 .tabItem { Label("Overview", systemImage: "waveform") }
                 .tag(Tab.overview)
+            SoundGraphView()
+                .tabItem { Label("Sound graph", systemImage: "chart.xyaxis.line") }
+                .tag(Tab.graph)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(Tab.settings)
         }
         .padding(20)
-        .frame(width: 480)
+        .frame(width: 540)
     }
 }
 
