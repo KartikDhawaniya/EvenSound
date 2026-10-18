@@ -198,7 +198,7 @@ struct OverviewView: View {
             Group {
                 LabeledSlider(
                     title: "Hear quiet sounds better",
-                    caption: "How much quiet sound below the quiet threshold is raised.",
+                    caption: "How much of the gap up to the quiet threshold is filled. 100% lifts quiet sound right up to it.",
                     value: $controller.settings.quietBoost)
                 ThresholdSlider(
                     title: "Quiet threshold",
@@ -209,7 +209,7 @@ struct OverviewView: View {
                     range: SoundSettings.quietThresholdRange)
                 LabeledSlider(
                     title: "Reduce loud sounds",
-                    caption: "How firmly sound above the peak threshold is turned down.",
+                    caption: "How much of the excess above the peak threshold is removed. 100% holds loud sound at it.",
                     value: $controller.settings.loudReduction)
                 ThresholdSlider(
                     title: "Peak threshold",
@@ -229,6 +229,8 @@ struct OverviewView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
+                    Text("How quickly EvenSound reacts. Gentle sounds most natural; Strong reacts fastest.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             .disabled(!controller.settings.isEnabled)

@@ -81,18 +81,21 @@ public struct SoundSettings: Equatable, Codable, Sendable {
 }
 
 public struct ProcessingParameters: Equatable, Sendable {
-    /// Level quiet sound is raised toward.
-    public var targetLUFS = -18.0
-    public var maxBoostDB = 0.0
-    /// Sustained-loudness compressor: pulls steady loud sound down toward its threshold.
-    public var sustainedThresholdLUFS = -12.0
-    public var sustainedRatio = 1.0
+    /// Quiet threshold: quiet sound is lifted toward this level.
+    public var targetLUFS = -22.0
+    /// Share (0...1) of the gap below `targetLUFS` that is filled.
+    public var quietAmount = 0.0
+    /// Safety cap on the lift so near-silence and hiss are never blasted.
+    public var maxBoostDB = 20.0
+    /// Peak threshold and the share (0...1) of any excess above it that is removed.
+    public var sustainedThresholdLUFS = -20.0
+    public var sustainedAmount = 0.0
     public var sustainedAttack = 0.050
     public var sustainedRelease = 0.300
-    /// Fast compressor for sudden sounds that jump above the sustained level.
-    public var compressorThresholdLUFS = -6.0
-    public var compressorRatio = 1.0
-    public var kneeDB = 8.0
+    /// Fast stage for sudden sounds that jump above the steady level.
+    public var compressorThresholdLUFS = -14.0
+    public var compressorAmount = 0.0
+    public var kneeDB = 4.0
     public var compressorAttack = 0.010
     public var compressorRelease = 0.250
     public var levelerTimeConstant = 3.0
@@ -108,32 +111,33 @@ public struct ProcessingParameters: Equatable, Sendable {
     public init() {}
 
     public init(_ settings: SoundSettings) {
-        let q = min(max(settings.quietBoost, 0), 1)
-        let r = min(max(settings.loudReduction, 0), 1)
-        let boostRange, sustainedMaxRatio, fastMaxRatio: Double
+        quietAmount = min(max(settings.quietBoost, 0), 1)
+        let loud = min(max(settings.loudReduction, 0), 1)
+
+        // Intensity only changes how quickly EvenSound reacts.
         switch settings.intensity {
         case .gentle:
-            (boostRange, sustainedMaxRatio, fastMaxRatio) = (9, 3, 3)
-            (levelerRiseRate, levelerFallRate) = (0.75, 1.5)
-            (sustainedRelease, compressorRelease, limiterRelease) = (0.500, 0.400, 0.150)
+            (levelerTimeConstant, levelerRiseRate, levelerFallRate) = (4, 0.75, 1.5)
+            (sustainedAttack, sustainedRelease) = (0.080, 0.500)
+            (compressorAttack, compressorRelease, limiterRelease) = (0.015, 0.400, 0.150)
         case .balanced:
-            (boostRange, sustainedMaxRatio, fastMaxRatio) = (12, 6, 5)
-            (levelerRiseRate, levelerFallRate) = (1.5, 3)
-            (sustainedRelease, compressorRelease, limiterRelease) = (0.300, 0.250, 0.100)
+            (levelerTimeConstant, levelerRiseRate, levelerFallRate) = (3, 1.5, 3)
+            (sustainedAttack, sustainedRelease) = (0.050, 0.300)
+            (compressorAttack, compressorRelease, limiterRelease) = (0.010, 0.250, 0.100)
         case .strong:
-            (boostRange, sustainedMaxRatio, fastMaxRatio) = (15, 10, 8)
-            (levelerRiseRate, levelerFallRate) = (3, 5)
-            (sustainedRelease, compressorRelease, limiterRelease) = (0.200, 0.150, 0.060)
+            (levelerTimeConstant, levelerRiseRate, levelerFallRate) = (2, 3, 5)
+            (sustainedAttack, sustainedRelease) = (0.030, 0.200)
+            (compressorAttack, compressorRelease, limiterRelease) = (0.005, 0.150, 0.060)
         }
-        maxBoostDB = q * boostRange
+
         sustainedThresholdLUFS = min(max(settings.peakThresholdDB, SoundSettings.peakThresholdRange.lowerBound),
                                      SoundSettings.peakThresholdRange.upperBound)
         let quiet = min(max(settings.quietThresholdDB, SoundSettings.quietThresholdRange.lowerBound),
                         SoundSettings.quietThresholdRange.upperBound)
         targetLUFS = min(quiet, sustainedThresholdLUFS)
-        sustainedRatio = 1 + (sustainedMaxRatio - 1) * r
+        sustainedAmount = loud
         compressorThresholdLUFS = sustainedThresholdLUFS + 6
-        compressorRatio = 1 + (fastMaxRatio - 1) * r
+        compressorAmount = loud
         gateLUFS = settings.noiseProtection.gateLUFS
         ceilingDB = settings.ceiling.decibels
         bypass = !settings.isEnabled

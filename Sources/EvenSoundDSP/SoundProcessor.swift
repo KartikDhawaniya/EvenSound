@@ -210,11 +210,11 @@ public final class SoundProcessor: @unchecked Sendable {
             levelerGain += levelerStep
 
             let sustainedLevel = lufs(fromMeanSquare: meanSquareSustained) + levelerGain
-            let sustainedWanted = compressorCurve(sustainedLevel, params.sustainedThresholdLUFS, params.sustainedRatio)
+            let sustainedWanted = compressorCurve(sustainedLevel, params.sustainedThresholdLUFS, params.sustainedAmount)
             let sustainedCoef = sustainedWanted < sustainedGain ? sustainedAttackCoef : sustainedReleaseCoef
             sustainedGain = sustainedWanted + sustainedCoef * (sustainedGain - sustainedWanted)
 
-            let wanted = compressorCurve(fastLUFS + levelerGain + sustainedGain, params.compressorThresholdLUFS, params.compressorRatio)
+            let wanted = compressorCurve(fastLUFS + levelerGain + sustainedGain, params.compressorThresholdLUFS, params.compressorAmount)
             let coef = wanted < compressorGain ? compressorAttackCoef : compressorReleaseCoef
             compressorGain = wanted + coef * (compressorGain - wanted)
 
@@ -280,7 +280,7 @@ public final class SoundProcessor: @unchecked Sendable {
     }
 
     private func applyParameters(_ p: ProcessingParameters) {
-        if hasAppliedParameters, p.maxBoostDB != params.maxBoostDB || p.targetLUFS != params.targetLUFS {
+        if hasAppliedParameters, p.quietAmount != params.quietAmount || p.targetLUFS != params.targetLUFS {
             settleRemaining = 0.6
         }
         hasAppliedParameters = true
@@ -306,7 +306,7 @@ public final class SoundProcessor: @unchecked Sendable {
         if fastLUFS >= params.gateLUFS {
             silentTime = 0
             let slowLUFS = lufs(fromMeanSquare: meanSquareSlow)
-            let wanted = min(params.maxBoostDB, max(0, params.targetLUFS - slowLUFS))
+            let wanted = min(params.maxBoostDB, params.quietAmount * max(0, params.targetLUFS - slowLUFS))
             let rate = min(riseRate, max(-fallRate, (wanted - next) / timeConstant))
             next += rate * dt
         } else {
@@ -322,11 +322,12 @@ public final class SoundProcessor: @unchecked Sendable {
     }
 
     @inline(__always)
-    private func compressorCurve(_ level: Double, _ threshold: Double, _ ratio: Double) -> Double {
-        guard ratio > 1 else { return 0 }
+    /// Gain change that removes `amount` (0...1) of the excess above `threshold`, with a soft knee.
+    private func compressorCurve(_ level: Double, _ threshold: Double, _ amount: Double) -> Double {
+        guard amount > 0 else { return 0 }
         let over = level - threshold
         let knee = params.kneeDB
-        let slope = 1 / ratio - 1
+        let slope = -amount
         if over <= -knee / 2 { return 0 }
         if over >= knee / 2 { return slope * over }
         let x = over + knee / 2

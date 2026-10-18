@@ -57,11 +57,13 @@ private func settings(quiet: Double, loud: Double, enabled: Bool = true) -> Proc
 
 @Test func defaultsMapToDocumentedValues() {
     let p = ProcessingParameters(SoundSettings())
-    #expect(abs(p.maxBoostDB - 7.8) < 1e-9)
-    #expect(abs(p.sustainedThresholdLUFS - -20) < 1e-9)
-    #expect(abs(p.sustainedRatio - 5) < 1e-9)
-    #expect(abs(p.compressorThresholdLUFS - -14) < 1e-9)
-    #expect(abs(p.compressorRatio - 4.2) < 1e-9)
+    #expect(p.quietAmount == 0.65)
+    #expect(p.maxBoostDB == 20)
+    #expect(p.targetLUFS == -22)
+    #expect(p.sustainedThresholdLUFS == -20)
+    #expect(p.sustainedAmount == 0.8)
+    #expect(p.compressorThresholdLUFS == -14)
+    #expect(p.compressorAmount == 0.8)
     #expect(p.ceilingDB == -1)
 }
 
@@ -76,16 +78,17 @@ private func steadyGain(_ processor: SoundProcessor, amplitude: Double, seconds:
     func gain(_ loud: Double) -> Double {
         steadyGain(SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: settings(quiet: 0.65, loud: loud)), amplitude: 0.5, seconds: 3)
     }
+    // -6 LUFS in, 14 dB above the -20 peak threshold.
     #expect(abs(gain(0)) < 0.5)
-    #expect(abs(gain(0.4) - -9.6) < 1)
-    #expect(abs(gain(1) - -11.7) < 1)
+    #expect(abs(gain(0.4) - -6.6) < 1)
+    #expect(abs(gain(1) - -14) < 0.7)
 }
 
 @Test func peakThresholdSetsWhereLoudSoundSettles() {
     var s = SoundSettings()
     s.peakThresholdDB = -30
     let gain = steadyGain(SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: ProcessingParameters(s)), amplitude: 0.5, seconds: 3)
-    #expect(abs(gain - -19.6) < 1)
+    #expect(abs(gain - -19.2) < 1)
 }
 
 @Test func currentLevelMetersTrackInputAndOutput() {
@@ -100,8 +103,8 @@ private func steadyGain(_ processor: SoundProcessor, amplitude: Double, seconds:
     let before = steadyGain(p, amplitude: 0.5, seconds: 5)
     p.setParameters(settings(quiet: 0.65, loud: 1))
     let after = steadyGain(p, amplitude: 0.5, seconds: 0.3)
-    #expect(abs(before - -7.7) < 1)
-    #expect(after < -10.5)
+    #expect(abs(before - -3.8) < 1)
+    #expect(after < -12.5)
 }
 
 @Test func quietSliderTakesEffectWithinAFractionOfASecond() {
@@ -109,7 +112,7 @@ private func steadyGain(_ processor: SoundProcessor, amplitude: Double, seconds:
     let before = steadyGain(p, amplitude: 0.0293, seconds: 10)
     p.setParameters(settings(quiet: 1, loud: 0.8))
     let after = steadyGain(p, amplitude: 0.0293, seconds: 0.6)
-    #expect(abs(before - 2.4) < 0.5)
+    #expect(abs(before - 1.74) < 0.5)
     #expect(after > before + 5)
 }
 
@@ -166,14 +169,15 @@ private func steadyGain(_ processor: SoundProcessor, amplitude: Double, seconds:
     #expect(Double(samplePeak) < 0.5 * 0.75)
 }
 
-@Test func levelerRaisesQuietDialogueByMaxBoost() {
+@Test func quietSliderFillsItsShareOfTheGap() {
     let p = SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: settings(quiet: 0.65, loud: 0.8))
     // ~ -30 LUFS speech-band tone.
     let input = sine(frequency: 1000, amplitude: 0.0316 / 1.08, seconds: 20)
     let output = run(p, input)
     let tail = input.count - 96_000
     let gain = rmsDB(output[tail...]) - rmsDB(input[tail...])
-    #expect(abs(gain - 7.8) < 0.5)
+    // About -30.7 LUFS in, 8.7 dB below the -22 quiet threshold; 65% of that gap is filled.
+    #expect(abs(gain - 5.66) < 0.5)
 }
 
 @Test func levelerDoesNotRaiseBackgroundNoise() {
@@ -239,4 +243,22 @@ private func steadyGain(_ processor: SoundProcessor, amplitude: Double, seconds:
     let elapsed = Date().timeIntervalSince(start)
     // Must be faster than real time even in unoptimised builds running alongside other tests.
     #expect(elapsed < 10)
+}
+
+@Test func quietSliderAtFullLiftsAllTheWayToTheThreshold() {
+    let p = SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: settings(quiet: 1, loud: 0.8))
+    // About -40 LUFS in; 100% fills the whole 18 dB gap to the -22 quiet threshold.
+    let gain = steadyGain(p, amplitude: 0.01, seconds: 30, lastSeconds: 2)
+    #expect(abs(gain - 18) < 0.8)
+}
+
+@Test func intensityChangesSpeedNotAmount() {
+    func gain(_ intensity: Intensity) -> Double {
+        var s = SoundSettings()
+        s.intensity = intensity
+        return steadyGain(SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: ProcessingParameters(s)), amplitude: 0.5, seconds: 4)
+    }
+    let balanced = gain(.balanced)
+    #expect(abs(gain(.gentle) - balanced) < 0.3)
+    #expect(abs(gain(.strong) - balanced) < 0.3)
 }
