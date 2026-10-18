@@ -295,19 +295,19 @@ private func curveProcessor() -> SoundProcessor {
 }
 
 @Test func curveBringsSteadyLoudSoundTowardMaximum() {
-    // -6 LUFS in; the default curve (min -30, max -16, slope ~1) maps it to about -17.1.
-    let expected = ProcessingParameters(SoundSettings()).curveOutput(-6) - -6
+    // -6 LUFS in; the default curve maps it to about -17.1 and the 80% loud slider applies 80% of that.
+    let expected = 0.8 * (ProcessingParameters(SoundSettings()).curveOutput(-6) - -6)
     let gain = steadyGain(curveProcessor(), amplitude: 0.5, seconds: 3)
     #expect(abs(gain - expected) < 0.8)
-    #expect(gain < -10)
+    #expect(gain < -8)
 }
 
 @Test func curveLiftsQuietSoundTowardMinimum() {
     let p = ProcessingParameters(SoundSettings())
     // About -40.0 LUFS in.
     let gain = steadyGain(curveProcessor(), amplitude: 0.01, seconds: 30, lastSeconds: 2)
-    #expect(abs(gain - (p.curveOutput(-40) - -40)) < 0.8)
-    #expect(gain > 8)
+    #expect(abs(gain - 0.65 * (p.curveOutput(-40) - -40)) < 0.8)
+    #expect(gain > 6)
 }
 
 @Test func curveKeepsLouderInputLouder() {
@@ -315,4 +315,15 @@ private func curveProcessor() -> SoundProcessor {
     let b = steadyGain(curveProcessor(), amplitude: 0.25, seconds: 3)
     // Outputs: -6 + a versus -12 + b.
     #expect(-6 + a > -12 + b)
+}
+
+@Test func simpleSlidersScaleTheCurve() {
+    func gain(loud: Double) -> Double {
+        var s = SoundSettings()
+        s.loudReduction = loud
+        return steadyGain(SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: ProcessingParameters(s)), amplitude: 0.5, seconds: 3)
+    }
+    let full = ProcessingParameters(SoundSettings()).curveOutput(-6) - -6
+    #expect(abs(gain(loud: 0)) < 0.5)
+    #expect(abs(gain(loud: 1) - full) < 0.8)
 }

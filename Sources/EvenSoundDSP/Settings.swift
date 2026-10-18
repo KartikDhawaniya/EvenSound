@@ -193,7 +193,7 @@ public struct ProcessingParameters: Equatable, Sendable {
             curveSlope = LevelCurve.slope(flatten: settings.curveFlatten)
             // Sudden bangs above the ceiling are still caught by the fast stage.
             compressorThresholdLUFS = curveMaxLUFS + 3
-            compressorAmount = 0.9
+            compressorAmount = 0.9 * loud
         }
         gateLUFS = settings.noiseProtection.gateLUFS
         ceilingDB = settings.ceiling.decibels

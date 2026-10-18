@@ -210,8 +210,10 @@ public final class SoundProcessor: @unchecked Sendable {
             levelerGain += levelerStep
 
             let sustainedLevel = lufs(fromMeanSquare: meanSquareSustained) + levelerGain
+            let sustainedInput = sustainedLevel - levelerGain
+            let curveCorrection = params.useCurve ? params.curveOutput(sustainedInput) - sustainedInput : 0
             let sustainedWanted = params.useCurve
-                ? min(0, params.curveOutput(sustainedLevel - levelerGain) - sustainedLevel)
+                ? (curveCorrection < 0 ? min(0, params.sustainedAmount * curveCorrection - levelerGain) : 0)
                 : compressorCurve(sustainedLevel, params.sustainedThresholdLUFS, params.sustainedAmount)
             let sustainedCoef = sustainedWanted < sustainedGain ? sustainedAttackCoef : sustainedReleaseCoef
             sustainedGain = sustainedWanted + sustainedCoef * (sustainedGain - sustainedWanted)
@@ -311,7 +313,7 @@ public final class SoundProcessor: @unchecked Sendable {
             silentTime = 0
             let slowLUFS = lufs(fromMeanSquare: meanSquareSlow)
             let lift = params.useCurve
-                ? params.curveOutput(slowLUFS) - slowLUFS
+                ? params.quietAmount * (params.curveOutput(slowLUFS) - slowLUFS)
                 : params.quietAmount * (params.targetLUFS - slowLUFS)
             let wanted = min(params.maxBoostDB, max(0, lift))
             let rate = min(riseRate, max(-fallRate, (wanted - next) / timeConstant))

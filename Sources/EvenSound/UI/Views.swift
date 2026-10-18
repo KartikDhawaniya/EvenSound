@@ -2,23 +2,32 @@ import EvenSoundDSP
 import SwiftUI
 
 struct MainView: View {
-    private enum Tab: Hashable { case overview, graph, settings }
+    private enum Tab: Hashable { case overview, graph, advanced, settings }
     @State private var tab = Tab.overview
+    @AppStorage("showAdvancedControls") private var showAdvanced = false
 
     var body: some View {
         TabView(selection: $tab) {
             OverviewView()
                 .tabItem { Label("Overview", systemImage: "waveform") }
                 .tag(Tab.overview)
-            SoundGraphView()
-                .tabItem { Label("Sound graph", systemImage: "chart.xyaxis.line") }
-                .tag(Tab.graph)
+            if showAdvanced {
+                SoundGraphView()
+                    .tabItem { Label("Sound graph", systemImage: "chart.xyaxis.line") }
+                    .tag(Tab.graph)
+                AdvancedView()
+                    .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
+                    .tag(Tab.advanced)
+            }
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(Tab.settings)
         }
         .padding(20)
         .frame(width: 540)
+        .onChange(of: showAdvanced) { _, shown in
+            if !shown, tab == .graph || tab == .advanced { tab = .settings }
+        }
     }
 }
 
@@ -83,18 +92,6 @@ struct LabeledSlider: View {
     }
 }
 
-struct ActivityBar: View {
-    let title: String
-    let amount: Double
-
-    var body: some View {
-        HStack {
-            Text(title).font(.caption).frame(width: 150, alignment: .leading)
-            ProgressView(value: min(max(amount, 0), 1)).animation(.easeOut(duration: 0.15), value: amount)
-        }
-    }
-}
-
 struct ThresholdSlider: View {
     let title: String
     let caption: String
@@ -124,24 +121,16 @@ struct ThresholdControls: View {
     @EnvironmentObject private var controller: AudioController
 
     var body: some View {
-        LabeledSlider(
-            title: "Hear quiet sounds better",
-            caption: "How much of the gap up to the quiet threshold is filled. 100% lifts quiet sound right up to it.",
-            value: $controller.settings.quietBoost)
         ThresholdSlider(
             title: "Quiet threshold",
-            caption: "Sound quieter than this gets raised. Move it right to lift more sound.",
+            caption: "Sound quieter than this is lifted toward it. \"Hear quiet sounds better\" sets how much of the gap is filled.",
             value: Binding(
                 get: { controller.settings.quietThresholdDB },
                 set: { controller.settings.quietThresholdDB = min($0, controller.settings.peakThresholdDB) }),
             range: SoundSettings.quietThresholdRange)
-        LabeledSlider(
-            title: "Reduce loud sounds",
-            caption: "How much of the excess above the peak threshold is removed. 100% holds loud sound at it.",
-            value: $controller.settings.loudReduction)
         ThresholdSlider(
             title: "Peak threshold",
-            caption: "Sound louder than this gets turned down. Move it left to keep more sound quieter.",
+            caption: "Sound louder than this is pulled toward it. \"Reduce loud sounds\" sets how much of the excess is removed.",
             value: Binding(
                 get: { controller.settings.peakThresholdDB },
                 set: {
@@ -301,6 +290,33 @@ struct LevelMeter: View {
     }
 }
 
+/// Plain-language description of what EvenSound is doing right now.
+struct NowSummary: View {
+    @EnvironmentObject private var controller: AudioController
+
+    private var state: (icon: String, text: String, color: Color) {
+        let m = controller.meters
+        guard controller.isActive else { return ("pause.circle", "Not balancing right now", .secondary) }
+        guard m.soundPresent else { return ("ear", "Listening — nothing is playing", .secondary) }
+        let change = m.currentOutputLUFS - m.currentInputLUFS
+        if change > 1 { return ("arrow.up.circle.fill", "Lifting quiet sound so it's easier to hear", .green) }
+        if change < -1 { return ("arrow.down.circle.fill", "Softening loud sound", .orange) }
+        return ("checkmark.circle.fill", "Sound is at a comfortable level", .green)
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: state.icon).font(.title2).foregroundStyle(state.color)
+            Text(state.text).font(.body)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        .animation(.easeInOut(duration: 0.2), value: state.text)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 struct OverviewView: View {
     @EnvironmentObject private var controller: AudioController
 
@@ -320,6 +336,51 @@ struct OverviewView: View {
             StatusBadge()
 
             Group {
+                LabeledSlider(
+                    title: "Hear quiet sounds better",
+                    caption: "Lifts quiet voices and soft scenes.",
+                    value: $controller.settings.quietBoost)
+                LabeledSlider(
+                    title: "Reduce loud sounds",
+                    caption: "Softens explosions, loud adverts and sudden bangs.",
+                    value: $controller.settings.loudReduction)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Intensity").font(.body.weight(.medium))
+                    Picker("Intensity", selection: $controller.settings.intensity) {
+                        ForEach(Intensity.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    Text("Gentle sounds most natural. Strong reacts fastest.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .disabled(!controller.settings.isEnabled)
+
+            Picker("Play sound on", selection: Binding(
+                get: { controller.currentDeviceID },
+                set: { controller.selectDevice($0) }
+            )) {
+                ForEach(controller.devices) { Text($0.name).tag($0.id) }
+            }
+
+            if controller.settings.isEnabled {
+                NowSummary()
+            }
+        }
+    }
+}
+
+struct AdvancedView: View {
+    @EnvironmentObject private var controller: AudioController
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Levels are shown in decibels (dB). 0 dB is the loudest digital sound; lower numbers are quieter.")
+                    .font(.caption).foregroundStyle(.secondary)
+
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Balancing style").font(.body.weight(.medium))
                     Picker("Balancing style", selection: $controller.settings.profile) {
@@ -335,44 +396,29 @@ struct OverviewView: View {
                     ThresholdControls()
                 }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Intensity").font(.body.weight(.medium))
-                    Picker("Intensity", selection: $controller.settings.intensity) {
-                        ForEach(Intensity.allCases) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    Text("How quickly EvenSound reacts. Gentle sounds most natural; Strong reacts fastest.")
-                        .font(.caption).foregroundStyle(.secondary)
+                if controller.isActive {
+                    LevelMeter(
+                        input: controller.meters.currentInputLUFS,
+                        output: controller.meters.currentOutputLUFS,
+                        threshold: controller.settings.profile == .curve
+                            ? controller.settings.curveMaxDB : controller.settings.peakThresholdDB,
+                        quietThreshold: controller.settings.profile == .curve
+                            ? min(controller.settings.curveMinDB, controller.settings.curveMaxDB - SoundSettings.curveMinimumGap)
+                            : min(controller.settings.quietThresholdDB, controller.settings.peakThresholdDB),
+                        active: controller.settings.isEnabled)
                 }
             }
-            .disabled(!controller.settings.isEnabled)
-
-            Picker("Play sound on", selection: Binding(
-                get: { controller.currentDeviceID },
-                set: { controller.selectDevice($0) }
-            )) {
-                ForEach(controller.devices) { Text($0.name).tag($0.id) }
-            }
-
-            if controller.isActive {
-                LevelMeter(
-                    input: controller.meters.currentInputLUFS,
-                    output: controller.meters.currentOutputLUFS,
-                    threshold: controller.settings.profile == .curve
-                        ? controller.settings.curveMaxDB : controller.settings.peakThresholdDB,
-                    quietThreshold: controller.settings.profile == .curve
-                        ? min(controller.settings.curveMinDB, controller.settings.curveMaxDB - SoundSettings.curveMinimumGap)
-                        : min(controller.settings.quietThresholdDB, controller.settings.peakThresholdDB),
-                    active: controller.settings.isEnabled)
-            }
+            .padding(.trailing, 8)
         }
+        .frame(height: 560)
+        .disabled(!controller.settings.isEnabled)
     }
 }
 
 struct SettingsView: View {
     @EnvironmentObject private var controller: AudioController
-    @State private var showAdvanced = false
+    @State private var showMoreOptions = false
+    @AppStorage("showAdvancedControls") private var showAdvanced = false
 
     var body: some View {
         Form {
@@ -388,7 +434,7 @@ struct SettingsView: View {
             }
 
             Section {
-                DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
+                DisclosureGroup("More options", isExpanded: $showMoreOptions) {
                     Picker("Loudest allowed sound", selection: $controller.settings.ceiling) {
                         ForEach(LoudnessCeiling.allCases) { Text($0.title).tag($0) }
                     }
@@ -398,6 +444,12 @@ struct SettingsView: View {
                     Toggle("Low delay mode (for games and instruments)", isOn: $controller.settings.lowLatency)
                     Button("Restore default settings") { controller.resetToDefaults() }
                 }
+            }
+
+            Section {
+                Toggle("Show advanced controls", isOn: $showAdvanced)
+                Text("Adds the Sound graph and Advanced tabs, with detailed level controls for people who like to fine-tune.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section {
