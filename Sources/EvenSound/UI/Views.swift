@@ -117,61 +117,17 @@ struct ThresholdSlider: View {
     }
 }
 
-struct ThresholdControls: View {
-    @EnvironmentObject private var controller: AudioController
-
-    var body: some View {
-        ThresholdSlider(
-            title: "Quiet threshold",
-            caption: "Anything quieter than this is lifted toward it; anything louder isn't lifted at all. \"Hear quiet sounds better\" on the Overview sets how far it is lifted: 50% closes half the gap, 100% brings it right up to this level.",
-            value: Binding(
-                get: { controller.settings.quietThresholdDB },
-                set: { controller.settings.quietThresholdDB = min($0, controller.settings.peakThresholdDB) }),
-            range: SoundSettings.quietThresholdRange)
-        ThresholdSlider(
-            title: "Peak threshold",
-            caption: "Anything louder than this is turned down toward it; anything quieter isn't touched. \"Reduce loud sounds\" on the Overview sets how much: 50% removes half the extra loudness, 100% holds sound at this level.",
-            value: Binding(
-                get: { controller.settings.peakThresholdDB },
-                set: {
-                    controller.settings.peakThresholdDB = $0
-                    if controller.settings.quietThresholdDB > $0 { controller.settings.quietThresholdDB = $0 }
-                }),
-            range: SoundSettings.peakThresholdRange)
-    }
-}
-
 struct CurveControls: View {
     @EnvironmentObject private var controller: AudioController
 
     var body: some View {
-        ThresholdSlider(
-            title: "Maximum level",
-            caption: "The loudest that sound should get. Loud sound is eased down toward this level, more firmly the louder it is. Move left if loud scenes still feel too loud.",
-            value: Binding(
-                get: { controller.settings.curveMaxDB },
-                set: {
-                    controller.settings.curveMaxDB = $0
-                    let highestMin = $0 - SoundSettings.curveMinimumGap
-                    if controller.settings.curveMinDB > highestMin { controller.settings.curveMinDB = highestMin }
-                }),
-            range: SoundSettings.curveMaxRange)
-        ThresholdSlider(
-            title: "Minimum level",
-            caption: "The quietest that sound should get. Quiet sound is eased up toward this level. Move right if quiet voices are still hard to hear.",
-            value: Binding(
-                get: { controller.settings.curveMinDB },
-                set: {
-                    controller.settings.curveMinDB = min($0, controller.settings.curveMaxDB - SoundSettings.curveMinimumGap)
-                }),
-            range: SoundSettings.curveMinRange)
         LabeledSlider(
             title: "Flatten",
-            caption: "How strongly sound between the two levels is evened out. Low leaves normal-volume sound almost untouched; high makes everything nearly the same loudness, which can sound flat.",
+            caption: "How strongly sound between your quietest and loudest levels is evened out. Low leaves normal-volume sound almost untouched; high makes everything nearly the same loudness, which can sound flat.",
             value: $controller.settings.curveFlatten)
         CurvePreview(
-            minimum: min(controller.settings.curveMinDB, controller.settings.curveMaxDB - SoundSettings.curveMinimumGap),
-            maximum: controller.settings.curveMaxDB,
+            minimum: controller.settings.quietestLevelDB,
+            maximum: controller.settings.loudestLevelDB,
             slope: LevelCurve.slope(flatten: controller.settings.curveFlatten),
             currentInput: controller.isActive ? controller.meters.currentInputLUFS : nil)
     }
@@ -317,6 +273,88 @@ struct NowSummary: View {
     }
 }
 
+/// Describes a loudness level in everyday words.
+func loudnessWord(_ level: Double) -> String {
+    switch level {
+    case ..<(-34): "Very soft"
+    case ..<(-26): "Soft"
+    case ..<(-18): "Medium"
+    case ..<(-12): "Loud"
+    default: "Very loud"
+    }
+}
+
+/// A level slider without numbers: shows an everyday word instead of decibels.
+struct LevelSlider: View {
+    let title: String
+    let caption: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title).font(.body.weight(.medium))
+                Spacer()
+                Text(loudnessWord(value)).foregroundStyle(.secondary)
+            }
+            Slider(value: $value, in: range, step: 1) {
+                Text(title)
+            } minimumValueLabel: {
+                Text("Softer").font(.caption)
+            } maximumValueLabel: {
+                Text("Louder").font(.caption)
+            }
+            Text(caption).font(.caption).foregroundStyle(.secondary)
+        }
+        .accessibilityValue(loudnessWord(value))
+    }
+}
+
+/// The band between the quietest and loudest levels, with a dot for the sound right now.
+struct ComfortRange: View {
+    @EnvironmentObject private var controller: AudioController
+    private let range = -50.0 ... -6.0
+
+    private func position(_ level: Double, _ width: CGFloat) -> CGFloat {
+        CGFloat((min(max(level, range.lowerBound), range.upperBound) - range.lowerBound)
+            / (range.upperBound - range.lowerBound)) * width
+    }
+
+    var body: some View {
+        let low = controller.settings.quietestLevelDB
+        let high = controller.settings.loudestLevelDB
+        let now = controller.isActive && controller.meters.soundPresent ? controller.meters.currentOutputLUFS : nil
+        VStack(alignment: .leading, spacing: 4) {
+            GeometryReader { geo in
+                let w = geo.size.width
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.quaternary).frame(height: 10)
+                    Capsule().fill(Color.green.opacity(0.35))
+                        .frame(width: max(position(high, w) - position(low, w), 4), height: 10)
+                        .offset(x: position(low, w))
+                    if let now {
+                        Circle().fill(Color.accentColor).frame(width: 14, height: 14)
+                            .offset(x: position(now, w) - 7)
+                            .animation(.linear(duration: 0.1), value: now)
+                    }
+                }
+                .frame(maxHeight: .infinity)
+            }
+            .frame(height: 16)
+            HStack {
+                Text("Softer").font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Text("Comfortable range").font(.caption2).foregroundStyle(.green)
+                Spacer()
+                Text("Louder").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Comfortable range from \(loudnessWord(low)) to \(loudnessWord(high))")
+    }
+}
+
 struct InfoBox: View {
     let title: String
     let text: String
@@ -379,14 +417,17 @@ struct OverviewView: View {
             StatusBadge()
 
             Group {
-                LabeledSlider(
-                    title: "Hear quiet sounds better",
-                    caption: "Lifts quiet voices and soft scenes.",
-                    value: $controller.settings.quietBoost)
-                LabeledSlider(
-                    title: "Reduce loud sounds",
-                    caption: "Softens explosions, loud adverts and sudden bangs.",
-                    value: $controller.settings.loudReduction)
+                LevelSlider(
+                    title: "Loudest sound",
+                    caption: "Explosions, adverts and sudden bangs are kept from going louder than this.",
+                    value: $controller.settings.loudestLevelDB,
+                    range: controller.settings.loudestLevelRange)
+                LevelSlider(
+                    title: "Quietest sound",
+                    caption: "Quiet voices and soft scenes are lifted up toward this.",
+                    value: $controller.settings.quietestLevelDB,
+                    range: controller.settings.quietestLevelRange)
+                ComfortRange()
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Intensity").font(.body.weight(.medium))
@@ -423,9 +464,9 @@ struct AdvancedView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 InfoBox(title: "About these controls", text: """
-                    These controls decide which volume levels count as "too quiet" and "too loud". \
-                    The two sliders on the Overview still decide how strongly EvenSound corrects them, \
-                    and Intensity still decides how quickly.
+                    The Overview sets your loudest and quietest levels. These controls fine-tune how \
+                    EvenSound gets sound there: the balancing style, how strongly it corrects, and how \
+                    it treats sound in between. Intensity on the Overview still decides how quickly it reacts.
 
                     Levels are in decibels (dB). 0 dB is the loudest sound your Mac can play; \
                     lower numbers are quieter. Most videos and music sit between -30 and -10 dB. \
@@ -445,10 +486,30 @@ struct AdvancedView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Your levels").font(.body.weight(.medium))
+                    Text("Loudest sound: \(Int(controller.settings.loudestLevelDB.rounded())) dB  ·  Quietest sound: \(Int(controller.settings.quietestLevelDB.rounded())) dB")
+                        .monospacedDigit()
+                    Text("Set these with the two sliders on the Overview. Each balancing style remembers its own levels.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
                 if controller.settings.profile == .curve {
                     CurveControls()
-                } else {
-                    ThresholdControls()
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Correction strength").font(.body.weight(.medium))
+                    Text("How fully EvenSound moves sound to your levels. At 100% loud sound is held at your loudest level and quiet sound is lifted to your quietest level. Lower values correct only part of the way, keeping more of the original contrast.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    LabeledSlider(
+                        title: "Lift quiet sound",
+                        caption: "50% lifts quiet sound halfway to your quietest level; 100% lifts it all the way.",
+                        value: $controller.settings.quietBoost)
+                    LabeledSlider(
+                        title: "Soften loud sound",
+                        caption: "50% removes half of the extra loudness above your loudest level; 100% removes all of it.",
+                        value: $controller.settings.loudReduction)
                 }
 
                 if controller.isActive {
@@ -457,11 +518,8 @@ struct AdvancedView: View {
                     LevelMeter(
                         input: controller.meters.currentInputLUFS,
                         output: controller.meters.currentOutputLUFS,
-                        threshold: controller.settings.profile == .curve
-                            ? controller.settings.curveMaxDB : controller.settings.peakThresholdDB,
-                        quietThreshold: controller.settings.profile == .curve
-                            ? min(controller.settings.curveMinDB, controller.settings.curveMaxDB - SoundSettings.curveMinimumGap)
-                            : min(controller.settings.quietThresholdDB, controller.settings.peakThresholdDB),
+                        threshold: controller.settings.loudestLevelDB,
+                        quietThreshold: controller.settings.quietestLevelDB,
                         active: controller.settings.isEnabled)
                 }
             }

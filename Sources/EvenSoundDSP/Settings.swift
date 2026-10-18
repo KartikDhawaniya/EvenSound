@@ -91,8 +91,9 @@ public enum LevelCurve {
 /// User-facing settings. Slider values are positions in 0...1, not calibrated audio values.
 public struct SoundSettings: Equatable, Codable, Sendable {
     public var isEnabled = true
-    public var quietBoost = 0.65
-    public var loudReduction = 0.80
+    /// Correction strength (0...1). 1 applies the full correction toward the chosen levels.
+    public var quietBoost = 1.0
+    public var loudReduction = 1.0
     public var intensity = Intensity.balanced
     public var ceiling = LoudnessCeiling.standard
     public var noiseProtection = NoiseProtection.medium
@@ -114,6 +115,35 @@ public struct SoundSettings: Equatable, Codable, Sendable {
     public static let curveMinRange = -50.0 ... -10.0
     public static let curveMaxRange = -40.0 ... -6.0
     public static let curveMinimumGap = 2.0
+
+    /// The loudest level for the active balancing style.
+    public var loudestLevelDB: Double {
+        get { profile == .curve ? curveMaxDB : peakThresholdDB }
+        set {
+            if profile == .curve {
+                curveMaxDB = min(max(newValue, Self.curveMaxRange.lowerBound), Self.curveMaxRange.upperBound)
+                curveMinDB = min(curveMinDB, curveMaxDB - Self.curveMinimumGap)
+            } else {
+                peakThresholdDB = min(max(newValue, Self.peakThresholdRange.lowerBound), Self.peakThresholdRange.upperBound)
+                quietThresholdDB = min(quietThresholdDB, peakThresholdDB)
+            }
+        }
+    }
+
+    /// The quietest level for the active balancing style.
+    public var quietestLevelDB: Double {
+        get { profile == .curve ? min(curveMinDB, curveMaxDB - Self.curveMinimumGap) : min(quietThresholdDB, peakThresholdDB) }
+        set {
+            if profile == .curve {
+                curveMinDB = min(max(newValue, Self.curveMinRange.lowerBound), curveMaxDB - Self.curveMinimumGap)
+            } else {
+                quietThresholdDB = min(max(newValue, Self.quietThresholdRange.lowerBound), peakThresholdDB)
+            }
+        }
+    }
+
+    public var loudestLevelRange: ClosedRange<Double> { profile == .curve ? Self.curveMaxRange : Self.peakThresholdRange }
+    public var quietestLevelRange: ClosedRange<Double> { profile == .curve ? Self.curveMinRange : Self.quietThresholdRange }
 
     public init() {}
 }

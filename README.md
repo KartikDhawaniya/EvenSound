@@ -3,12 +3,12 @@
 A macOS app (14.2 or later) that balances the sound of every app. It uses Core Audio process taps,
 so no audio driver is needed.
 
-The main screen is plain-language only: Sound balance on or off, "Hear quiet sounds better",
-"Reduce loud sounds", Intensity and the output device. Detailed controls are hidden until
+The main screen is plain-language only: Sound balance on or off, **Loudest sound** and **Quietest
+sound** (a comfortable range shown without numbers), Intensity and the output device. Detailed controls are hidden until
 **Settings → Show advanced controls** is turned on, which adds the Sound graph and Advanced tabs.
 
-The Advanced tab offers two balancing styles. In both, the two main sliders set how much of the
-correction is applied:
+The Advanced tab offers two balancing styles, plus "Correction strength" sliders (default 100%) that
+set how fully sound is moved to the chosen levels:
 
 - **Smooth curve** (default): each input level maps to an output level along an arctan curve. Loud
   sound approaches the maximum level, quiet sound approaches the minimum, and sound in the middle is

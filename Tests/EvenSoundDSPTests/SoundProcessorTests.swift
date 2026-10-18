@@ -60,13 +60,13 @@ private func settings(quiet: Double, loud: Double, enabled: Bool = true) -> Proc
     var s = SoundSettings()
     s.profile = .thresholds
     let p = ProcessingParameters(s)
-    #expect(p.quietAmount == 0.65)
+    #expect(p.quietAmount == 1)
     #expect(p.maxBoostDB == 20)
     #expect(p.targetLUFS == -22)
     #expect(p.sustainedThresholdLUFS == -20)
-    #expect(p.sustainedAmount == 0.8)
+    #expect(p.sustainedAmount == 1)
     #expect(p.compressorThresholdLUFS == -14)
-    #expect(p.compressorAmount == 0.8)
+    #expect(p.compressorAmount == 1)
     #expect(p.ceilingDB == -1)
 }
 
@@ -92,7 +92,7 @@ private func steadyGain(_ processor: SoundProcessor, amplitude: Double, seconds:
     s.profile = .thresholds
     s.peakThresholdDB = -30
     let gain = steadyGain(SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: ProcessingParameters(s)), amplitude: 0.5, seconds: 3)
-    #expect(abs(gain - -19.2) < 1)
+    #expect(abs(gain - -24) < 1)
 }
 
 @Test func currentLevelMetersTrackInputAndOutput() {
@@ -295,8 +295,8 @@ private func curveProcessor() -> SoundProcessor {
 }
 
 @Test func curveBringsSteadyLoudSoundTowardMaximum() {
-    // -6 LUFS in; the default curve maps it to about -17.1 and the 80% loud slider applies 80% of that.
-    let expected = 0.8 * (ProcessingParameters(SoundSettings()).curveOutput(-6) - -6)
+    // -6 LUFS in; the default curve maps it to about -17.1 at full strength.
+    let expected = ProcessingParameters(SoundSettings()).curveOutput(-6) - -6
     let gain = steadyGain(curveProcessor(), amplitude: 0.5, seconds: 3)
     #expect(abs(gain - expected) < 0.8)
     #expect(gain < -8)
@@ -306,8 +306,8 @@ private func curveProcessor() -> SoundProcessor {
     let p = ProcessingParameters(SoundSettings())
     // About -40.0 LUFS in.
     let gain = steadyGain(curveProcessor(), amplitude: 0.01, seconds: 30, lastSeconds: 2)
-    #expect(abs(gain - 0.65 * (p.curveOutput(-40) - -40)) < 0.8)
-    #expect(gain > 6)
+    #expect(abs(gain - (p.curveOutput(-40) - -40)) < 0.8)
+    #expect(gain > 9)
 }
 
 @Test func curveKeepsLouderInputLouder() {
@@ -326,4 +326,19 @@ private func curveProcessor() -> SoundProcessor {
     let full = ProcessingParameters(SoundSettings()).curveOutput(-6) - -6
     #expect(abs(gain(loud: 0)) < 0.5)
     #expect(abs(gain(loud: 1) - full) < 0.8)
+}
+
+@Test func loudestAndQuietestLevelsStayInOrder() {
+    var s = SoundSettings()
+    s.loudestLevelDB = -30
+    #expect(s.curveMaxDB == -30)
+    #expect(s.quietestLevelDB <= -32)
+    s.quietestLevelDB = -5
+    #expect(s.quietestLevelDB == -32)
+
+    s.profile = .thresholds
+    s.loudestLevelDB = -25
+    s.quietestLevelDB = -10
+    #expect(s.peakThresholdDB == -25)
+    #expect(s.quietThresholdDB == -25)
 }
