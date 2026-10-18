@@ -210,7 +210,9 @@ public final class SoundProcessor: @unchecked Sendable {
             levelerGain += levelerStep
 
             let sustainedLevel = lufs(fromMeanSquare: meanSquareSustained) + levelerGain
-            let sustainedWanted = compressorCurve(sustainedLevel, params.sustainedThresholdLUFS, params.sustainedAmount)
+            let sustainedWanted = params.useCurve
+                ? min(0, params.curveOutput(sustainedLevel - levelerGain) - sustainedLevel)
+                : compressorCurve(sustainedLevel, params.sustainedThresholdLUFS, params.sustainedAmount)
             let sustainedCoef = sustainedWanted < sustainedGain ? sustainedAttackCoef : sustainedReleaseCoef
             sustainedGain = sustainedWanted + sustainedCoef * (sustainedGain - sustainedWanted)
 
@@ -280,7 +282,9 @@ public final class SoundProcessor: @unchecked Sendable {
     }
 
     private func applyParameters(_ p: ProcessingParameters) {
-        if hasAppliedParameters, p.quietAmount != params.quietAmount || p.targetLUFS != params.targetLUFS {
+        if hasAppliedParameters, p.quietAmount != params.quietAmount || p.targetLUFS != params.targetLUFS
+            || p.useCurve != params.useCurve || p.curveMinLUFS != params.curveMinLUFS
+            || p.curveMaxLUFS != params.curveMaxLUFS || p.curveSlope != params.curveSlope {
             settleRemaining = 0.6
         }
         hasAppliedParameters = true
@@ -306,7 +310,10 @@ public final class SoundProcessor: @unchecked Sendable {
         if fastLUFS >= params.gateLUFS {
             silentTime = 0
             let slowLUFS = lufs(fromMeanSquare: meanSquareSlow)
-            let wanted = min(params.maxBoostDB, params.quietAmount * max(0, params.targetLUFS - slowLUFS))
+            let lift = params.useCurve
+                ? params.curveOutput(slowLUFS) - slowLUFS
+                : params.quietAmount * (params.targetLUFS - slowLUFS)
+            let wanted = min(params.maxBoostDB, max(0, lift))
             let rate = min(riseRate, max(-fallRate, (wanted - next) / timeConstant))
             next += rate * dt
         } else {

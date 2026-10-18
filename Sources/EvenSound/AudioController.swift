@@ -30,7 +30,7 @@ final class AudioController: ObservableObject {
     private var meterTimer: Timer?
     private var watchedDevice: AudioDeviceID = kAudioObjectUnknown
     private var deviceListeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
-    private static let settingsKey = "EvenSound.settings.v3"
+    private static let settingsKey = "EvenSound.settings.v4"
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.settingsKey),

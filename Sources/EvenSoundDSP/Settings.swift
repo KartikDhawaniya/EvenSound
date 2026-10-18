@@ -60,6 +60,34 @@ public enum NoiseProtection: String, CaseIterable, Codable, Sendable, Identifiab
     }
 }
 
+public enum BalanceProfile: String, CaseIterable, Codable, Sendable, Identifiable {
+    case thresholds, curve
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .thresholds: "Thresholds"
+        case .curve: "Smooth curve"
+        }
+    }
+}
+
+/// Arctan level curve: output approaches `maximum` for loud input and `minimum` for quiet input,
+/// passes through the midpoint unchanged and has slope `slope` there.
+public enum LevelCurve {
+    public static func output(_ level: Double, minimum: Double, maximum: Double, slope: Double) -> Double {
+        let centre = (minimum + maximum) / 2
+        let half = max((maximum - minimum) / 2, 0.5)
+        return centre + half * (2 / .pi) * atan(slope * (level - centre) * .pi / (2 * half))
+    }
+
+    /// Maps the "Flatten" control (0...1) to the slope at the midpoint.
+    public static func slope(flatten: Double) -> Double {
+        1.5 - 1.3 * min(max(flatten, 0), 1)
+    }
+}
+
 /// User-facing settings. Slider values are positions in 0...1, not calibrated audio values.
 public struct SoundSettings: Equatable, Codable, Sendable {
     public var isEnabled = true
@@ -76,6 +104,16 @@ public struct SoundSettings: Equatable, Codable, Sendable {
 
     public static let peakThresholdRange = -40.0 ... -6.0
     public static let quietThresholdRange = -50.0 ... -10.0
+
+    public var profile = BalanceProfile.curve
+    /// Smooth-curve profile: quiet sound approaches `curveMinDB`, loud sound approaches `curveMaxDB`.
+    public var curveMinDB = -30.0
+    public var curveMaxDB = -16.0
+    public var curveFlatten = 0.4
+
+    public static let curveMinRange = -50.0 ... -10.0
+    public static let curveMaxRange = -40.0 ... -6.0
+    public static let curveMinimumGap = 2.0
 
     public init() {}
 }
@@ -107,8 +145,17 @@ public struct ProcessingParameters: Equatable, Sendable {
     public var ceilingDB = -1.0
     public var limiterRelease = 0.100
     public var bypass = false
+    /// Smooth-curve profile.
+    public var useCurve = false
+    public var curveMinLUFS = -30.0
+    public var curveMaxLUFS = -16.0
+    public var curveSlope = 1.0
 
     public init() {}
+
+    public func curveOutput(_ level: Double) -> Double {
+        LevelCurve.output(level, minimum: curveMinLUFS, maximum: curveMaxLUFS, slope: curveSlope)
+    }
 
     public init(_ settings: SoundSettings) {
         quietAmount = min(max(settings.quietBoost, 0), 1)
@@ -138,6 +185,16 @@ public struct ProcessingParameters: Equatable, Sendable {
         sustainedAmount = loud
         compressorThresholdLUFS = sustainedThresholdLUFS + 6
         compressorAmount = loud
+        if settings.profile == .curve {
+            useCurve = true
+            curveMaxLUFS = min(max(settings.curveMaxDB, SoundSettings.curveMaxRange.lowerBound), SoundSettings.curveMaxRange.upperBound)
+            curveMinLUFS = min(max(settings.curveMinDB, SoundSettings.curveMinRange.lowerBound),
+                               curveMaxLUFS - SoundSettings.curveMinimumGap)
+            curveSlope = LevelCurve.slope(flatten: settings.curveFlatten)
+            // Sudden bangs above the ceiling are still caught by the fast stage.
+            compressorThresholdLUFS = curveMaxLUFS + 3
+            compressorAmount = 0.9
+        }
         gateLUFS = settings.noiseProtection.gateLUFS
         ceilingDB = settings.ceiling.decibels
         bypass = !settings.isEnabled

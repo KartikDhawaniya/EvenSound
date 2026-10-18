@@ -38,6 +38,7 @@ private func rmsDB(_ samples: ArraySlice<Float>) -> Double {
 
 private func settings(quiet: Double, loud: Double, enabled: Bool = true) -> ProcessingParameters {
     var s = SoundSettings()
+    s.profile = .thresholds
     s.quietBoost = quiet
     s.loudReduction = loud
     s.isEnabled = enabled
@@ -56,7 +57,9 @@ private func settings(quiet: Double, loud: Double, enabled: Bool = true) -> Proc
 }
 
 @Test func defaultsMapToDocumentedValues() {
-    let p = ProcessingParameters(SoundSettings())
+    var s = SoundSettings()
+    s.profile = .thresholds
+    let p = ProcessingParameters(s)
     #expect(p.quietAmount == 0.65)
     #expect(p.maxBoostDB == 20)
     #expect(p.targetLUFS == -22)
@@ -86,6 +89,7 @@ private func steadyGain(_ processor: SoundProcessor, amplitude: Double, seconds:
 
 @Test func peakThresholdSetsWhereLoudSoundSettles() {
     var s = SoundSettings()
+    s.profile = .thresholds
     s.peakThresholdDB = -30
     let gain = steadyGain(SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: ProcessingParameters(s)), amplitude: 0.5, seconds: 3)
     #expect(abs(gain - -19.2) < 1)
@@ -118,6 +122,7 @@ private func steadyGain(_ processor: SoundProcessor, amplitude: Double, seconds:
 
 @Test func quietThresholdSetsWhereQuietSoundIsRaisedTo() {
     var s = SoundSettings()
+    s.profile = .thresholds
     s.quietBoost = 1
     s.quietThresholdDB = -26
     let p = SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: ProcessingParameters(s))
@@ -255,10 +260,59 @@ private func steadyGain(_ processor: SoundProcessor, amplitude: Double, seconds:
 @Test func intensityChangesSpeedNotAmount() {
     func gain(_ intensity: Intensity) -> Double {
         var s = SoundSettings()
+        s.profile = .thresholds
         s.intensity = intensity
         return steadyGain(SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: ProcessingParameters(s)), amplitude: 0.5, seconds: 4)
     }
     let balanced = gain(.balanced)
     #expect(abs(gain(.gentle) - balanced) < 0.3)
     #expect(abs(gain(.strong) - balanced) < 0.3)
+}
+
+// MARK: Smooth curve profile
+
+@Test func curveIsUnchangedAtMidpointAndApproachesLimits() {
+    let mid = LevelCurve.output(-23, minimum: -30, maximum: -16, slope: 1)
+    #expect(abs(mid - -23) < 1e-9)
+    let loud = LevelCurve.output(40, minimum: -30, maximum: -16, slope: 1)
+    let quiet = LevelCurve.output(-200, minimum: -30, maximum: -16, slope: 1)
+    #expect(loud < -16 && loud > -16.5)
+    #expect(quiet > -30 && quiet < -29.5)
+    var previous = -Double.infinity
+    for level in stride(from: -80.0, through: 10, by: 0.5) {
+        let out = LevelCurve.output(level, minimum: -30, maximum: -16, slope: 0.5)
+        #expect(out > previous)
+        previous = out
+    }
+    let h = 1e-4
+    let slope = (LevelCurve.output(-23 + h, minimum: -30, maximum: -16, slope: 0.7)
+        - LevelCurve.output(-23 - h, minimum: -30, maximum: -16, slope: 0.7)) / (2 * h)
+    #expect(abs(slope - 0.7) < 1e-4)
+}
+
+private func curveProcessor() -> SoundProcessor {
+    SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: ProcessingParameters(SoundSettings()))
+}
+
+@Test func curveBringsSteadyLoudSoundTowardMaximum() {
+    // -6 LUFS in; the default curve (min -30, max -16, slope ~1) maps it to about -17.1.
+    let expected = ProcessingParameters(SoundSettings()).curveOutput(-6) - -6
+    let gain = steadyGain(curveProcessor(), amplitude: 0.5, seconds: 3)
+    #expect(abs(gain - expected) < 0.8)
+    #expect(gain < -10)
+}
+
+@Test func curveLiftsQuietSoundTowardMinimum() {
+    let p = ProcessingParameters(SoundSettings())
+    // About -40.0 LUFS in.
+    let gain = steadyGain(curveProcessor(), amplitude: 0.01, seconds: 30, lastSeconds: 2)
+    #expect(abs(gain - (p.curveOutput(-40) - -40)) < 0.8)
+    #expect(gain > 8)
+}
+
+@Test func curveKeepsLouderInputLouder() {
+    let a = steadyGain(curveProcessor(), amplitude: 0.5, seconds: 3)
+    let b = steadyGain(curveProcessor(), amplitude: 0.25, seconds: 3)
+    // Outputs: -6 + a versus -12 + b.
+    #expect(-6 + a > -12 + b)
 }

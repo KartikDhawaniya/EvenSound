@@ -1,8 +1,13 @@
 # EvenSound
 
-A macOS app (14.2 or later) that balances the sound of every app. It raises quiet sound up toward a
-quiet threshold and turns loud sound down toward a peak threshold. It uses Core Audio process taps,
-so no audio driver is needed.
+A macOS app (14.2 or later) that balances the sound of every app. It uses Core Audio process taps,
+so no audio driver is needed. There are two balancing styles:
+
+- **Smooth curve** (default): each input level maps to an output level along an arctan curve. Loud
+  sound approaches the maximum level, quiet sound approaches the minimum, and sound in the middle is
+  barely changed. Flatten sets the slope in the middle.
+- **Thresholds**: quiet sound is lifted toward a quiet threshold and loud sound is pulled toward a peak
+  threshold. Each slider sets the share of the gap or excess that is corrected.
 
 ## Build and test
 

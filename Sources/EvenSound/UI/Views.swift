@@ -117,6 +117,127 @@ struct ThresholdSlider: View {
     }
 }
 
+struct ThresholdControls: View {
+    @EnvironmentObject private var controller: AudioController
+
+    var body: some View {
+        LabeledSlider(
+            title: "Hear quiet sounds better",
+            caption: "How much of the gap up to the quiet threshold is filled. 100% lifts quiet sound right up to it.",
+            value: $controller.settings.quietBoost)
+        ThresholdSlider(
+            title: "Quiet threshold",
+            caption: "Sound quieter than this gets raised. Move it right to lift more sound.",
+            value: Binding(
+                get: { controller.settings.quietThresholdDB },
+                set: { controller.settings.quietThresholdDB = min($0, controller.settings.peakThresholdDB) }),
+            range: SoundSettings.quietThresholdRange)
+        LabeledSlider(
+            title: "Reduce loud sounds",
+            caption: "How much of the excess above the peak threshold is removed. 100% holds loud sound at it.",
+            value: $controller.settings.loudReduction)
+        ThresholdSlider(
+            title: "Peak threshold",
+            caption: "Sound louder than this gets turned down. Move it left to keep more sound quieter.",
+            value: Binding(
+                get: { controller.settings.peakThresholdDB },
+                set: {
+                    controller.settings.peakThresholdDB = $0
+                    if controller.settings.quietThresholdDB > $0 { controller.settings.quietThresholdDB = $0 }
+                }),
+            range: SoundSettings.peakThresholdRange)
+    }
+}
+
+struct CurveControls: View {
+    @EnvironmentObject private var controller: AudioController
+
+    var body: some View {
+        ThresholdSlider(
+            title: "Maximum level",
+            caption: "Loud sound is smoothly pulled toward this level and never goes past it.",
+            value: Binding(
+                get: { controller.settings.curveMaxDB },
+                set: {
+                    controller.settings.curveMaxDB = $0
+                    let highestMin = $0 - SoundSettings.curveMinimumGap
+                    if controller.settings.curveMinDB > highestMin { controller.settings.curveMinDB = highestMin }
+                }),
+            range: SoundSettings.curveMaxRange)
+        ThresholdSlider(
+            title: "Minimum level",
+            caption: "Quiet sound is smoothly lifted toward this level.",
+            value: Binding(
+                get: { controller.settings.curveMinDB },
+                set: {
+                    controller.settings.curveMinDB = min($0, controller.settings.curveMaxDB - SoundSettings.curveMinimumGap)
+                }),
+            range: SoundSettings.curveMinRange)
+        LabeledSlider(
+            title: "Flatten",
+            caption: "Low keeps everyday sound natural. High pulls everything toward the same loudness.",
+            value: $controller.settings.curveFlatten)
+        CurvePreview(
+            minimum: min(controller.settings.curveMinDB, controller.settings.curveMaxDB - SoundSettings.curveMinimumGap),
+            maximum: controller.settings.curveMaxDB,
+            slope: LevelCurve.slope(flatten: controller.settings.curveFlatten),
+            currentInput: controller.isActive ? controller.meters.currentInputLUFS : nil)
+    }
+}
+
+/// Plots output level against input level for the smooth curve.
+struct CurvePreview: View {
+    let minimum: Double
+    let maximum: Double
+    let slope: Double
+    let currentInput: Double?
+    private let range = -60.0 ... 0.0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Canvas { context, size in
+                let span = range.upperBound - range.lowerBound
+                func point(_ input: Double, _ output: Double) -> CGPoint {
+                    CGPoint(
+                        x: (input - range.lowerBound) / span * size.width,
+                        y: size.height - (min(max(output, range.lowerBound), range.upperBound) - range.lowerBound) / span * size.height)
+                }
+                var unchanged = Path()
+                unchanged.move(to: point(range.lowerBound, range.lowerBound))
+                unchanged.addLine(to: point(range.upperBound, range.upperBound))
+                context.stroke(unchanged, with: .color(.secondary.opacity(0.5)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+
+                for (level, color) in [(maximum, Color.red), (minimum, Color.blue)] {
+                    var line = Path()
+                    line.move(to: point(range.lowerBound, level))
+                    line.addLine(to: point(range.upperBound, level))
+                    context.stroke(line, with: .color(color.opacity(0.6)), lineWidth: 1)
+                }
+
+                var curve = Path()
+                for step in 0...120 {
+                    let input = range.lowerBound + span * Double(step) / 120
+                    let p = point(input, LevelCurve.output(input, minimum: minimum, maximum: maximum, slope: slope))
+                    step == 0 ? curve.move(to: p) : curve.addLine(to: p)
+                }
+                context.stroke(curve, with: .color(.accentColor), lineWidth: 2)
+
+                if let currentInput, currentInput > range.lowerBound {
+                    let output = LevelCurve.output(currentInput, minimum: minimum, maximum: maximum, slope: slope)
+                    let p = point(currentInput, output)
+                    context.fill(Path(ellipseIn: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)), with: .color(.orange))
+                }
+            }
+            .frame(height: 120)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+            Text("Sound going in (left to right) and coming out (bottom to top). Dashed line = unchanged; orange dot = now.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Curve from minimum \(Int(minimum)) to maximum \(Int(maximum)) dB")
+    }
+}
+
 struct LevelMeter: View {
     let input: Double
     let output: Double
@@ -196,31 +317,20 @@ struct OverviewView: View {
             StatusBadge()
 
             Group {
-                LabeledSlider(
-                    title: "Hear quiet sounds better",
-                    caption: "How much of the gap up to the quiet threshold is filled. 100% lifts quiet sound right up to it.",
-                    value: $controller.settings.quietBoost)
-                ThresholdSlider(
-                    title: "Quiet threshold",
-                    caption: "Sound quieter than this gets raised. Move it right to lift more sound.",
-                    value: Binding(
-                        get: { controller.settings.quietThresholdDB },
-                        set: { controller.settings.quietThresholdDB = min($0, controller.settings.peakThresholdDB) }),
-                    range: SoundSettings.quietThresholdRange)
-                LabeledSlider(
-                    title: "Reduce loud sounds",
-                    caption: "How much of the excess above the peak threshold is removed. 100% holds loud sound at it.",
-                    value: $controller.settings.loudReduction)
-                ThresholdSlider(
-                    title: "Peak threshold",
-                    caption: "Sound louder than this gets turned down. Move it left to keep more sound quieter.",
-                    value: Binding(
-                        get: { controller.settings.peakThresholdDB },
-                        set: {
-                            controller.settings.peakThresholdDB = $0
-                            if controller.settings.quietThresholdDB > $0 { controller.settings.quietThresholdDB = $0 }
-                        }),
-                    range: SoundSettings.peakThresholdRange)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Balancing style").font(.body.weight(.medium))
+                    Picker("Balancing style", selection: $controller.settings.profile) {
+                        ForEach(BalanceProfile.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+
+                if controller.settings.profile == .curve {
+                    CurveControls()
+                } else {
+                    ThresholdControls()
+                }
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Intensity").font(.body.weight(.medium))
@@ -246,8 +356,11 @@ struct OverviewView: View {
                 LevelMeter(
                     input: controller.meters.currentInputLUFS,
                     output: controller.meters.currentOutputLUFS,
-                    threshold: controller.settings.peakThresholdDB,
-                    quietThreshold: min(controller.settings.quietThresholdDB, controller.settings.peakThresholdDB),
+                    threshold: controller.settings.profile == .curve
+                        ? controller.settings.curveMaxDB : controller.settings.peakThresholdDB,
+                    quietThreshold: controller.settings.profile == .curve
+                        ? min(controller.settings.curveMinDB, controller.settings.curveMaxDB - SoundSettings.curveMinimumGap)
+                        : min(controller.settings.quietThresholdDB, controller.settings.peakThresholdDB),
                     active: controller.settings.isEnabled)
             }
         }
