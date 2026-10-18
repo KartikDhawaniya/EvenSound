@@ -246,33 +246,6 @@ struct LevelMeter: View {
     }
 }
 
-/// Plain-language description of what EvenSound is doing right now.
-struct NowSummary: View {
-    @EnvironmentObject private var controller: AudioController
-
-    private var state: (icon: String, text: String, color: Color) {
-        let m = controller.meters
-        guard controller.isActive else { return ("pause.circle", "Not balancing right now", .secondary) }
-        guard m.soundPresent else { return ("ear", "Listening — nothing is playing", .secondary) }
-        let change = m.currentOutputLUFS - m.currentInputLUFS
-        if change > 1 { return ("arrow.up.circle.fill", "Lifting quiet sound so it's easier to hear", .green) }
-        if change < -1 { return ("arrow.down.circle.fill", "Softening loud sound", .orange) }
-        return ("checkmark.circle.fill", "Sound is at a comfortable level", .green)
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: state.icon).font(.title2).foregroundStyle(state.color)
-            Text(state.text).font(.body)
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-        .animation(.easeInOut(duration: 0.2), value: state.text)
-        .accessibilityElement(children: .combine)
-    }
-}
-
 /// Describes a loudness level in everyday words.
 func loudnessWord(_ level: Double) -> String {
     switch level {
@@ -370,34 +343,6 @@ struct InfoBox: View {
     }
 }
 
-/// Simple bars showing how much EvenSound is lifting or softening right now.
-struct CorrectionMeter: View {
-    @EnvironmentObject private var controller: AudioController
-
-    var body: some View {
-        let change = controller.isActive ? controller.meters.currentOutputLUFS - controller.meters.currentInputLUFS : 0
-        VStack(alignment: .leading, spacing: 6) {
-            bar("Lifting quiet sound", amount: max(change, 0) / 12, color: .green)
-            bar("Softening loud sound", amount: max(-change, 0) / 15, color: .orange)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private func bar(_ title: String, amount: Double, color: Color) -> some View {
-        HStack {
-            Text(title).font(.caption).frame(width: 140, alignment: .leading)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.quaternary)
-                    Capsule().fill(color).frame(width: geo.size.width * min(max(amount, 0), 1))
-                }
-            }
-            .frame(height: 8)
-            .animation(.easeOut(duration: 0.15), value: amount)
-        }
-    }
-}
-
 struct OverviewView: View {
     @EnvironmentObject private var controller: AudioController
 
@@ -449,10 +394,6 @@ struct OverviewView: View {
                 ForEach(controller.devices) { Text($0.name).tag($0.id) }
             }
 
-            if controller.settings.isEnabled {
-                NowSummary()
-                CorrectionMeter()
-            }
         }
     }
 }
