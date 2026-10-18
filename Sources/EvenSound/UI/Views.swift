@@ -297,7 +297,9 @@ struct ComfortRange: View {
     var body: some View {
         let low = controller.settings.quietestLevelDB
         let high = controller.settings.loudestLevelDB
-        let now = controller.isActive && controller.meters.soundPresent ? controller.meters.currentOutputLUFS : nil
+        let playing = controller.isActive && controller.meters.soundPresent
+        let original = playing ? controller.meters.currentInputLUFS : nil
+        let processed = playing ? controller.meters.currentOutputLUFS : nil
         VStack(alignment: .leading, spacing: 4) {
             GeometryReader { geo in
                 let w = geo.size.width
@@ -306,10 +308,15 @@ struct ComfortRange: View {
                     Capsule().fill(Color.green.opacity(0.35))
                         .frame(width: max(position(high, w) - position(low, w), 4), height: 10)
                         .offset(x: position(low, w))
-                    if let now {
-                        Circle().fill(Color.accentColor).frame(width: 14, height: 14)
-                            .offset(x: position(now, w) - 7)
-                            .animation(.linear(duration: 0.1), value: now)
+                    if let original {
+                        Circle().strokeBorder(Color.gray, lineWidth: 2).frame(width: 14, height: 14)
+                            .offset(x: position(original, w) - 7)
+                            .animation(.linear(duration: 0.1), value: original)
+                    }
+                    if let processed {
+                        Circle().fill(Color.accentColor).frame(width: 10, height: 10)
+                            .offset(x: position(processed, w) - 5)
+                            .animation(.linear(duration: 0.1), value: processed)
                     }
                 }
                 .frame(maxHeight: .infinity)
@@ -322,6 +329,20 @@ struct ComfortRange: View {
                 Spacer()
                 Text("Louder").font(.caption2).foregroundStyle(.secondary)
             }
+            HStack(spacing: 14) {
+                HStack(spacing: 4) {
+                    Circle().strokeBorder(Color.gray, lineWidth: 2).frame(width: 10, height: 10)
+                    Text("Original sound")
+                }
+                HStack(spacing: 4) {
+                    Circle().fill(Color.accentColor).frame(width: 8, height: 8)
+                    Text("After EvenSound")
+                }
+                if original == nil {
+                    Text("— play something to see it move").foregroundStyle(.secondary)
+                }
+            }
+            .font(.caption2)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Comfortable range from \(loudnessWord(low)) to \(loudnessWord(high))")
@@ -345,6 +366,18 @@ struct InfoBox: View {
 
 struct OverviewView: View {
     @EnvironmentObject private var controller: AudioController
+
+    private var intensityDescription: String {
+        let lead = "How quickly EvenSound reacts when sound suddenly gets louder or quieter. "
+        switch controller.settings.intensity {
+        case .gentle:
+            return lead + "Gentle changes the volume slowly and smoothly, so it sounds the most natural. Good for music."
+        case .balanced:
+            return lead + "Balanced is a good middle ground for films, shows and everyday use."
+        case .strong:
+            return lead + "Strong reacts fastest, catching loud adverts and bangs almost at once. Good for late-night watching, but you may sometimes hear the volume moving."
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -381,8 +414,8 @@ struct OverviewView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    Text("Gentle sounds most natural. Strong reacts fastest.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text(intensityDescription)
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
             .disabled(!controller.settings.isEnabled)
