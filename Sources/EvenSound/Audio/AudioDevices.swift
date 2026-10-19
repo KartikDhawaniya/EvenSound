@@ -120,6 +120,26 @@ enum AudioDevices {
         }
     }
 
+    /// Elements that may carry the output volume: the whole device, or the first two channels.
+    static let volumeElements: [AudioObjectPropertyElement] = [kAudioObjectPropertyElementMain, 1, 2]
+
+    /// The output volume in dB, or nil if the device has no software volume (e.g. some HDMI and USB outputs).
+    static func outputVolumeDB(_ id: AudioDeviceID) -> Double? {
+        var levels: [Double] = []
+        for element in volumeElements {
+            var addr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyVolumeDecibels, mScope: kAudioObjectPropertyScopeOutput, mElement: element)
+            guard AudioObjectHasProperty(id, &addr) else { continue }
+            var value = Float32(0)
+            var size = UInt32(MemoryLayout<Float32>.size)
+            if AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &value) == noErr, value.isFinite {
+                if element == kAudioObjectPropertyElementMain { return Double(value) }
+                levels.append(Double(value))
+            }
+        }
+        return levels.max()
+    }
+
     static func currentProcessObject() -> AudioObjectID {
         var addr = AudioObject.address(kAudioHardwarePropertyTranslatePIDToProcessObject)
         var pid = ProcessInfo.processInfo.processIdentifier

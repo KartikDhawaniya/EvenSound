@@ -200,16 +200,17 @@ public final class SoundProcessor: @unchecked Sendable {
             meanSquareSlow += slowCoef * (sumSquares - meanSquareSlow)
             meanSquareSustained += sustainedCoef * (sumSquares - meanSquareSustained)
             meanSquareFast += fastCoef * (sumSquares - meanSquareFast)
-            let fastLUFS = lufs(fromMeanSquare: meanSquareFast)
+            let fastSignalLUFS = lufs(fromMeanSquare: meanSquareFast)
+            let fastLUFS = fastSignalLUFS + params.volumeOffsetDB
 
             if controlCounter == 0 {
-                updateLeveler(fastLUFS: fastLUFS)
+                updateLeveler(fastSignalLUFS: fastSignalLUFS)
                 controlCounter = controlInterval
             }
             controlCounter -= 1
             levelerGain += levelerStep
 
-            let sustainedLevel = lufs(fromMeanSquare: meanSquareSustained) + levelerGain
+            let sustainedLevel = lufs(fromMeanSquare: meanSquareSustained) + params.volumeOffsetDB + levelerGain
             let sustainedInput = sustainedLevel - levelerGain
             let curveCorrection = params.useCurve ? params.curveOutput(sustainedInput) - sustainedInput : 0
             let sustainedWanted = params.useCurve
@@ -269,8 +270,9 @@ public final class SoundProcessor: @unchecked Sendable {
         }
 
         var snapshot = ProcessorMeters()
-        snapshot.inputLUFS = lufs(fromMeanSquare: meanSquareSlow)
-        let nowIn = lufs(fromMeanSquare: meanSquareSustained)
+        // Levels are reported as heard, matching the user's range.
+        snapshot.inputLUFS = lufs(fromMeanSquare: meanSquareSlow) + params.volumeOffsetDB
+        let nowIn = lufs(fromMeanSquare: meanSquareSustained) + params.volumeOffsetDB
         let processedGain = levelerGain + sustainedGain + compressorGain + 20 * log10(max(lastLimiterGain, 1e-6))
         snapshot.currentInputLUFS = nowIn
         snapshot.currentOutputLUFS = nowIn + mix * processedGain
@@ -286,7 +288,8 @@ public final class SoundProcessor: @unchecked Sendable {
     private func applyParameters(_ p: ProcessingParameters) {
         if hasAppliedParameters, p.quietAmount != params.quietAmount || p.targetLUFS != params.targetLUFS
             || p.useCurve != params.useCurve || p.curveMinLUFS != params.curveMinLUFS
-            || p.curveMaxLUFS != params.curveMaxLUFS || p.curveSlope != params.curveSlope {
+            || p.curveMaxLUFS != params.curveMaxLUFS || p.curveSlope != params.curveSlope
+            || abs(p.volumeOffsetDB - params.volumeOffsetDB) > 0.5 {
             settleRemaining = 0.6
         }
         hasAppliedParameters = true
@@ -300,7 +303,8 @@ public final class SoundProcessor: @unchecked Sendable {
         mixTarget = p.bypass ? 0 : 1
     }
 
-    private func updateLeveler(fastLUFS: Double) {
+    /// `fastSignalLUFS` is the raw signal level, so the noise gate ignores the Mac's volume.
+    private func updateLeveler(fastSignalLUFS: Double) {
         let dt = Double(controlInterval) / sampleRate
         let settling = settleRemaining > 0
         if settling { settleRemaining -= dt }
@@ -309,9 +313,9 @@ public final class SoundProcessor: @unchecked Sendable {
         let fallRate = settling ? 40 : params.levelerFallRate
 
         var next = levelerEnd
-        if fastLUFS >= params.gateLUFS {
+        if fastSignalLUFS >= params.gateLUFS {
             silentTime = 0
-            let slowLUFS = lufs(fromMeanSquare: meanSquareSlow)
+            let slowLUFS = lufs(fromMeanSquare: meanSquareSlow) + params.volumeOffsetDB
             let lift = params.useCurve
                 ? params.quietAmount * (params.curveOutput(slowLUFS) - slowLUFS)
                 : params.quietAmount * (params.targetLUFS - slowLUFS)

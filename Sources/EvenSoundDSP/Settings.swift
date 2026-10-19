@@ -180,6 +180,9 @@ public struct ProcessingParameters: Equatable, Sendable {
     public var curveMinLUFS = -30.0
     public var curveMaxLUFS = -16.0
     public var curveSlope = 1.0
+    /// How much louder (dB) the Mac's volume makes sound now than when the levels were chosen. Levels are
+    /// compared as heard (signal + offset), so the result stays in range whatever the volume.
+    public var volumeOffsetDB = 0.0
 
     public init() {}
 

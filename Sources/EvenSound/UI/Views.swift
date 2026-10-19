@@ -443,9 +443,12 @@ struct AdvancedView: View {
                     it treats sound in between. Intensity on the Overview still decides how quickly it reacts.
 
                     Levels are in decibels (dB). 0 dB is the loudest sound your Mac can play; \
-                    lower numbers are quieter. Most videos and music sit between -30 and -10 dB. \
-                    Your Mac's volume keys are applied afterwards, so these levels don't change when you turn the volume up or down.
+                    lower numbers are quieter. Most videos and music sit between -30 and -10 dB.
                     """)
+                Text(controller.keepRangeAtAnyVolume
+                    ? "Levels are as you hear them: EvenSound takes your Mac's volume into account, so sound stays between them when you turn the volume up or down."
+                    : "Your Mac's volume is applied after EvenSound, so turning it up or down makes everything louder or quieter, including your loudest level.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Balancing style").font(.body.weight(.medium))
@@ -523,6 +526,24 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("Keep sound in my range at any volume", isOn: $controller.keepRangeAtAnyVolume)
+                Text(controller.keepRangeAtAnyVolume
+                    ? "EvenSound allows for your Mac's volume. Turn it up and loud sound is held back more; turn it down and quiet sound is lifted more, so what you hear stays between your quietest and loudest levels. Each speaker or pair of headphones keeps its own setting."
+                    : "Your Mac's volume works as normal: it makes everything louder or quieter after EvenSound has balanced it.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if controller.keepRangeAtAnyVolume {
+                    HStack {
+                        Button("My levels sound right at this volume") { controller.useCurrentVolumeAsReference() }
+                            .disabled(controller.volumeOffsetDB == 0)
+                        Spacer()
+                        Text(volumeOffsetText).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    Text("Set the volume to where your levels feel right, then press this. EvenSound then holds that experience as the volume changes.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
                 DisclosureGroup("More options", isExpanded: $showMoreOptions) {
                     Picker("Loudest allowed sound", selection: $controller.settings.ceiling) {
                         ForEach(LoudnessCeiling.allCases) { Text($0.title).tag($0) }
@@ -554,6 +575,12 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var volumeOffsetText: String {
+        let offset = Int(controller.volumeOffsetDB.rounded())
+        if offset == 0 { return "Volume is where you set your levels" }
+        return offset > 0 ? "Volume \(offset) dB higher — holding back" : "Volume \(-offset) dB lower — lifting"
     }
 
     private static var versionText: String {

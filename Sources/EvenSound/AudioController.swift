@@ -33,6 +33,15 @@ final class AudioController: ObservableObject {
     @Published private(set) var meters = ProcessorMeters()
     @Published private(set) var launchAtLogin = SMAppService.mainApp.status == .enabled
     @Published private(set) var launchAtLoginMessage: String?
+    /// Keep sound in the user's range whatever the Mac's volume is.
+    @Published var keepRangeAtAnyVolume = UserDefaults.standard.object(forKey: AudioController.keepRangeKey) as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(keepRangeAtAnyVolume, forKey: Self.keepRangeKey)
+            volumeChanged()
+        }
+    }
+    /// How much louder (dB) the Mac's volume is now than when this device's levels were set; 0 when not following.
+    @Published private(set) var volumeOffsetDB = 0.0
 
     private let engine = TapEngine()
     private var restartWork: DispatchWorkItem?
@@ -41,6 +50,10 @@ final class AudioController: ObservableObject {
     private var watchedDevice: AudioDeviceID = kAudioObjectUnknown
     private var deviceListeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     private static let settingsKey = "EvenSound.settings.v5"
+    private static let keepRangeKey = "EvenSound.keepRangeAtAnyVolume"
+    private static let referenceVolumesKey = "EvenSound.referenceVolumeDB"
+    /// Beyond this much turning down, quiet sound can't be lifted all the way back into range.
+    static let maxVolumeCompensationDB = 20.0
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.settingsKey),
@@ -77,6 +90,8 @@ final class AudioController: ObservableObject {
         case .needsPermission:
             "Allow EvenSound under System Settings → Privacy & Security → Screen & System Audio Recording → System Audio Recording Only."
         case .problem(let message): message
+        case .active where volumeOffsetDB < -Self.maxVolumeCompensationDB:
+            "Your Mac's volume is turned down a lot, so quiet sound may stay below your range."
         case .active:
             meters.soundPresent ? "Sound is playing and being balanced." : "Waiting for sound to play."
         default: nil
@@ -138,7 +153,7 @@ final class AudioController: ObservableObject {
             if settings.isEnabled {
                 stopWork?.cancel()
                 if engine.isRunning {
-                    engine.processor?.setParameters(ProcessingParameters(settings))
+                    engine.processor?.setParameters(parameters())
                     updateActiveStatus()
                 } else {
                     startProcessing()
@@ -152,7 +167,41 @@ final class AudioController: ObservableObject {
             startProcessing()
             return
         }
-        engine.processor?.setParameters(ProcessingParameters(settings))
+        engine.processor?.setParameters(parameters())
+    }
+
+    private func parameters() -> ProcessingParameters {
+        var p = ProcessingParameters(settings)
+        p.volumeOffsetDB = volumeOffsetDB
+        return p
+    }
+
+    /// Makes the current volume on this device the one the levels are measured at.
+    func useCurrentVolumeAsReference() {
+        guard watchedDevice != kAudioObjectUnknown, let uid = try? AudioDevices.uid(watchedDevice) else { return }
+        var references = UserDefaults.standard.dictionary(forKey: Self.referenceVolumesKey) as? [String: Double] ?? [:]
+        references[uid] = nil
+        UserDefaults.standard.set(references, forKey: Self.referenceVolumesKey)
+        volumeChanged()
+    }
+
+    /// Re-reads the Mac's volume and keeps the processor's view of what the user hears up to date.
+    private func volumeChanged() {
+        var offset = 0.0
+        let device = watchedDevice
+        if keepRangeAtAnyVolume, device != kAudioObjectUnknown,
+           let volume = AudioDevices.outputVolumeDB(device), let uid = try? AudioDevices.uid(device) {
+            var references = UserDefaults.standard.dictionary(forKey: Self.referenceVolumesKey) as? [String: Double] ?? [:]
+            // The first time a device is seen, its levels mean what is heard at its current volume.
+            if references[uid] == nil {
+                references[uid] = volume
+                UserDefaults.standard.set(references, forKey: Self.referenceVolumesKey)
+            }
+            offset = volume - (references[uid] ?? volume)
+        }
+        guard offset != volumeOffsetDB else { return }
+        volumeOffsetDB = offset
+        engine.processor?.setParameters(parameters())
     }
 
     private func startProcessing() {
@@ -182,8 +231,8 @@ final class AudioController: ObservableObject {
         status = .starting
         do {
             let device = try AudioDevices.defaultOutput()
-            try engine.start(device: device, parameters: ProcessingParameters(settings), lowLatency: settings.lowLatency)
             watchDevice(device)
+            try engine.start(device: device, parameters: parameters(), lowLatency: settings.lowLatency)
             updateActiveStatus()
         } catch {
             engine.stop()
@@ -196,7 +245,7 @@ final class AudioController: ObservableObject {
             status = .off
             return
         }
-        engine.processor?.setParameters(ProcessingParameters(settings))
+        engine.processor?.setParameters(parameters())
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !self.settings.isEnabled else { return }
@@ -284,11 +333,26 @@ final class AudioController: ObservableObject {
         for selector in [kAudioDevicePropertyNominalSampleRate, kAudioDevicePropertyDeviceIsAlive, kAudioDevicePropertyStreamConfiguration] {
             addListener(device, selector) { [weak self] in self?.scheduleRestart() }
         }
+        for element in AudioDevices.volumeElements {
+            addListener(device, kAudioDevicePropertyVolumeScalar, scope: kAudioObjectPropertyScopeOutput, element: element) { [weak self] in
+                self?.volumeChanged()
+            }
+        }
+        volumeChanged()
     }
 
-    private func addListener(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, _ action: @escaping @MainActor () -> Void) {
-        var address = AudioObject.address(
-            selector, selector == kAudioDevicePropertyStreamConfiguration ? kAudioObjectPropertyScopeOutput : kAudioObjectPropertyScopeGlobal)
+    private func addListener(
+        _ object: AudioObjectID,
+        _ selector: AudioObjectPropertySelector,
+        scope: AudioObjectPropertyScope? = nil,
+        element: AudioObjectPropertyElement = kAudioObjectPropertyElementMain,
+        _ action: @escaping @MainActor () -> Void
+    ) {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: scope ?? (selector == kAudioDevicePropertyStreamConfiguration ? kAudioObjectPropertyScopeOutput : kAudioObjectPropertyScopeGlobal),
+            mElement: element)
+        guard AudioObjectHasProperty(object, &address) else { return }
         let block: AudioObjectPropertyListenerBlock = { _, _ in
             MainActor.assumeIsolated { action() }
         }

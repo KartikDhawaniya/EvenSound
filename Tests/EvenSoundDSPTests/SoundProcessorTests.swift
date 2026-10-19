@@ -342,3 +342,54 @@ private func curveProcessor() -> SoundProcessor {
     #expect(s.peakThresholdDB == -25)
     #expect(s.quietThresholdDB == -25)
 }
+
+private func withVolumeOffset(_ p: ProcessingParameters, _ offset: Double) -> ProcessingParameters {
+    var p = p
+    p.volumeOffsetDB = offset
+    return p
+}
+
+@Test func volumeTurnedUpHoldsLoudSoundBackByTheSameAmount() {
+    // -6 LUFS in; at the reference volume it settles at the -20 loudest level (gain -14).
+    let p = SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: withVolumeOffset(settings(quiet: 0.65, loud: 1), 10))
+    let gain = steadyGain(p, amplitude: 0.5, seconds: 3)
+    // Heard = signal + 10 dB, so the signal must end 10 dB lower for the heard level to stay at -20.
+    #expect(abs(gain - -24) < 0.7)
+    #expect(abs(p.meters.currentOutputLUFS - -20) < 1)
+}
+
+@Test func volumeTurnedDownLiftsQuietSoundBackIntoRange() {
+    // -30 LUFS in: 8 dB below the -22 quietest level. With the volume 8 dB lower it's heard at -38.
+    let amplitude = 0.5 * pow(10, -24.0 / 20)
+    let reference = steadyGain(SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: settings(quiet: 1, loud: 1)), amplitude: amplitude, seconds: 15)
+    let p = SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: withVolumeOffset(settings(quiet: 1, loud: 1), -8))
+    let turnedDown = steadyGain(p, amplitude: amplitude, seconds: 15)
+    #expect(abs(reference - 8) < 1)
+    #expect(abs(turnedDown - 16) < 1)
+    #expect(abs(p.meters.currentOutputLUFS - -22) < 1)
+}
+
+@Test func volumeChangeIsFollowedQuickly() {
+    let p = SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: settings(quiet: 1, loud: 1))
+    _ = steadyGain(p, amplitude: 0.5, seconds: 3)
+    p.setParameters(withVolumeOffset(settings(quiet: 1, loud: 1), 12))
+    let after = steadyGain(p, amplitude: 0.5, seconds: 0.5)
+    #expect(abs(after - -26) < 1.5)
+}
+
+@Test func smoothCurveKeepsHeardLevelInRangeWhenVolumeIsTurnedUp() {
+    var s = SoundSettings()
+    s.profile = .curve
+    let p = SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: withVolumeOffset(ProcessingParameters(s), 15))
+    _ = steadyGain(p, amplitude: 0.5, seconds: 4)
+    // Heard input is +9 LUFS, far above the -16 loudest level; heard output must stay close to it.
+    #expect(p.meters.currentInputLUFS > 8)
+    #expect(p.meters.currentOutputLUFS < s.curveMaxDB + 2)
+}
+
+@Test func noiseIsNotLiftedEvenWhenVolumeIsTurnedDown() {
+    // About -66 LUFS: below the noise gate. A low volume must not make EvenSound lift hiss.
+    let p = SoundProcessor(sampleRate: sampleRate, channels: 2, parameters: withVolumeOffset(settings(quiet: 1, loud: 1), -15))
+    let gain = steadyGain(p, amplitude: 0.5 * pow(10, -60.0 / 20), seconds: 6)
+    #expect(abs(gain) < 0.5)
+}
