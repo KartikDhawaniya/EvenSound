@@ -140,6 +140,48 @@ enum AudioDevices {
         return levels.max()
     }
 
+    private static func volumeAddress(_ id: AudioDeviceID, _ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress? {
+        for element in volumeElements {
+            var addr = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeOutput, mElement: element)
+            if AudioObjectHasProperty(id, &addr) { return addr }
+        }
+        return nil
+    }
+
+    /// Quietest and loudest volume the device allows, in dB.
+    static func outputVolumeRangeDB(_ id: AudioDeviceID) -> ClosedRange<Double>? {
+        guard var addr = volumeAddress(id, kAudioDevicePropertyVolumeRangeDecibels) else { return nil }
+        var range = AudioValueRange()
+        var size = UInt32(MemoryLayout<AudioValueRange>.size)
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &range) == noErr, range.mMaximum > range.mMinimum else { return nil }
+        return range.mMinimum...range.mMaximum
+    }
+
+    /// Position (0...1) of the system volume slider for a volume in dB.
+    static func volumeSliderPosition(_ id: AudioDeviceID, decibels: Double) -> Double? {
+        guard var addr = volumeAddress(id, kAudioDevicePropertyVolumeDecibelsToScalar) else { return nil }
+        var value = Float32(decibels)
+        var size = UInt32(MemoryLayout<Float32>.size)
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &value) == noErr, value.isFinite else { return nil }
+        return min(max(Double(value), 0), 1)
+    }
+
+    /// Sets the output volume in dB on every channel that has its own volume.
+    static func setOutputVolumeDB(_ id: AudioDeviceID, _ decibels: Double) throws {
+        var changed = false
+        for element in volumeElements {
+            var addr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyVolumeDecibels, mScope: kAudioObjectPropertyScopeOutput, mElement: element)
+            var settable: DarwinBoolean = false
+            guard AudioObjectHasProperty(id, &addr), AudioObjectIsPropertySettable(id, &addr, &settable) == noErr, settable.boolValue else { continue }
+            var value = Float32(decibels)
+            try check(AudioObjectSetPropertyData(id, &addr, 0, nil, UInt32(MemoryLayout<Float32>.size), &value), "Couldn't change the volume")
+            changed = true
+            if element == kAudioObjectPropertyElementMain { break }
+        }
+        if !changed { throw CoreAudioError("This device's volume can't be changed from your Mac") }
+    }
+
     static func currentProcessObject() -> AudioObjectID {
         var addr = AudioObject.address(kAudioHardwarePropertyTranslatePIDToProcessObject)
         var pid = ProcessInfo.processInfo.processIdentifier

@@ -364,6 +364,38 @@ struct InfoBox: View {
     }
 }
 
+/// Suggests the Mac volume at which what's been playing needs the least correcting.
+struct VolumeSuggestionCard: View {
+    @EnvironmentObject private var controller: AudioController
+    let suggestion: AudioController.VolumeSuggestion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if suggestion.isAboutRight {
+                Label("Your volume suits what you're listening to", systemImage: "checkmark.circle")
+                    .font(.callout.weight(.semibold)).foregroundStyle(.green)
+                Text("At \(suggestion.currentPercent)% EvenSound has little to correct, so sound stays natural.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Label("Best volume for what's playing: about \(suggestion.suggestedPercent)%", systemImage: "speaker.wave.2")
+                    .font(.callout.weight(.semibold))
+                Text(suggestion.suggestedPercent < suggestion.currentPercent
+                    ? "Your Mac is at \(suggestion.currentPercent)%, so EvenSound is holding a lot of sound back. A lower volume keeps more of the natural light and shade."
+                    : "Your Mac is at \(suggestion.currentPercent)%, so EvenSound is lifting a lot of sound. A higher volume needs less lifting and brings up less background noise.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Button("Set volume to \(suggestion.suggestedPercent)%") { controller.applySuggestedVolume() }
+                    .controlSize(.small)
+                if let message = controller.volumeSuggestionMessage {
+                    Text(message).font(.caption).foregroundStyle(.orange)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
 struct OverviewView: View {
     @EnvironmentObject private var controller: AudioController
 
@@ -393,6 +425,10 @@ struct OverviewView: View {
             .controlSize(.large)
 
             StatusBadge()
+
+            if controller.settings.isEnabled, controller.isActive, let suggestion = controller.volumeSuggestion {
+                VolumeSuggestionCard(suggestion: suggestion)
+            }
 
             Group {
                 LevelSlider(

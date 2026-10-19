@@ -42,6 +42,22 @@ final class AudioController: ObservableObject {
     }
     /// How much louder (dB) the Mac's volume is now than when this device's levels were set; 0 when not following.
     @Published private(set) var volumeOffsetDB = 0.0
+    @Published private(set) var volumeSuggestion: VolumeSuggestion?
+    @Published private(set) var volumeSuggestionMessage: String?
+
+    struct VolumeSuggestion: Equatable {
+        /// System volume slider positions, 0...100.
+        let currentPercent: Int
+        let suggestedPercent: Int
+        let suggestedDB: Double
+        /// True when the current volume is already close to the best one.
+        let isAboutRight: Bool
+    }
+
+    /// Recent loudness before the Mac's volume, while sound was playing.
+    private var signalLevels: [Double] = []
+    private var ticksSinceAdvice = 0
+    private var referenceVolumeDB: Double?
 
     private let engine = TapEngine()
     private var restartWork: DispatchWorkItem?
@@ -176,6 +192,55 @@ final class AudioController: ObservableObject {
         return p
     }
 
+    func applySuggestedVolume() {
+        guard let suggestion = volumeSuggestion else { return }
+        do {
+            try AudioDevices.setOutputVolumeDB(watchedDevice, suggestion.suggestedDB)
+        } catch {
+            volumeSuggestionMessage = error.localizedDescription
+        }
+    }
+
+    /// Learns from what is playing and works out which Mac volume needs the least correcting.
+    private func recordSignalLevel() {
+        guard isActive, meters.soundPresent, settings.isEnabled else { return }
+        signalLevels.append(meters.inputLUFS - volumeOffsetDB)
+        if signalLevels.count > Self.historyCapacity {
+            signalLevels.removeFirst(signalLevels.count - Self.historyCapacity)
+        }
+        ticksSinceAdvice += 1
+        if ticksSinceAdvice >= 20 {
+            ticksSinceAdvice = 0
+            updateVolumeSuggestion()
+        }
+    }
+
+    private func updateVolumeSuggestion() {
+        guard keepRangeAtAnyVolume, let reference = referenceVolumeDB, watchedDevice != kAudioObjectUnknown,
+              let volume = AudioDevices.outputVolumeDB(watchedDevice),
+              let deviceRange = AudioDevices.outputVolumeRangeDB(watchedDevice),
+              let advice = VolumeAdvisor.advise(
+                signalLevels: signalLevels,
+                currentOffset: volumeOffsetDB,
+                quietest: settings.quietestLevelDB,
+                loudest: settings.loudestLevelDB,
+                possibleOffsets: (deviceRange.lowerBound - reference)...(deviceRange.upperBound - reference)),
+              let current = AudioDevices.volumeSliderPosition(watchedDevice, decibels: volume),
+              let suggested = AudioDevices.volumeSliderPosition(watchedDevice, decibels: reference + advice.offsetDB)
+        else {
+            if volumeSuggestion != nil { volumeSuggestion = nil }
+            return
+        }
+        let currentPercent = Int((current * 100).rounded())
+        let suggestedPercent = Int((suggested * 100).rounded())
+        let aboutRight = abs(suggestedPercent - currentPercent) < 5
+            || advice.currentCorrectionDB - advice.suggestedCorrectionDB < 1
+        let next = VolumeSuggestion(
+            currentPercent: currentPercent, suggestedPercent: suggestedPercent,
+            suggestedDB: reference + advice.offsetDB, isAboutRight: aboutRight)
+        if next != volumeSuggestion { volumeSuggestion = next }
+    }
+
     /// Makes the current volume on this device the one the levels are measured at.
     func useCurrentVolumeAsReference() {
         guard watchedDevice != kAudioObjectUnknown, let uid = try? AudioDevices.uid(watchedDevice) else { return }
@@ -198,7 +263,11 @@ final class AudioController: ObservableObject {
                 UserDefaults.standard.set(references, forKey: Self.referenceVolumesKey)
             }
             offset = volume - (references[uid] ?? volume)
+            referenceVolumeDB = references[uid]
+        } else {
+            referenceVolumeDB = nil
         }
+        defer { updateVolumeSuggestion() }
         guard offset != volumeOffsetDB else { return }
         volumeOffsetDB = offset
         engine.processor?.setParameters(parameters())
@@ -283,6 +352,7 @@ final class AudioController: ObservableObject {
             meters = ProcessorMeters()
         }
         recordHistory()
+        recordSignalLevel()
         if case .active = status, let idle = engine.secondsSinceLastCallback, idle > 2 {
             scheduleRestart()
         }
