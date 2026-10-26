@@ -18,10 +18,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) { onTerminate?() }
 }
 
+private struct MenuBarIcon: View {
+    @ObservedObject var controller: AudioController
+
+    var body: some View {
+        Image(systemName: controller.isActive ? "waveform" : "waveform.slash")
+    }
+}
+
 @main
 struct EvenSoundApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var controller = AudioController()
+    // Deliberately not observed here: if the app scene re-renders on every meter update, the window's
+    // TabView is rebuilt 10 times a second and SwiftUI keeps the discarded tab items, so memory grows without bound.
+    @State private var controller = AudioController()
 
     var body: some Scene {
         Window("EvenSound", id: "main") {
@@ -34,7 +44,7 @@ struct EvenSoundApp: App {
         MenuBarExtra {
             MenuBarView().environmentObject(controller)
         } label: {
-            Image(systemName: controller.isActive ? "waveform" : "waveform.slash")
+            MenuBarIcon(controller: controller)
         }
         .menuBarExtraStyle(.window)
     }
